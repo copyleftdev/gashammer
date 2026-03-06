@@ -1,0 +1,281 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+env:
+  CARGO_TERM_COLOR: always
+  REGISTRY: ghcr.io
+  IMAGE_PREFIX: ghcr.io/${{ github.repository_owner }}
+
+permissions:
+  contents: write
+  packages: write
+  id-token: write
+
+jobs:
+  build:
+    name: Build (${{ matrix.target }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            arch: amd64
+          - target: aarch64-unknown-linux-gnu
+            arch: arm64
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install cross-compilation tools
+        if: matrix.arch == 'arm64'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu protobuf-compiler
+          echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc" >> "$GITHUB_ENV"
+
+      - name: Install protoc
+        if: matrix.arch == 'amd64'
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-release-${{ matrix.target }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-release-${{ matrix.target }}-
+
+      - name: Build hive binary
+        run: cargo build --release --target ${{ matrix.target }} --bin gashammer-hive
+
+      - name: Build edge binary
+        run: cargo build --release --target ${{ matrix.target }} --bin gashammer-edge
+
+      - name: Get version from tag
+        id: version
+        run: echo "version=${GITHUB_REF#refs/tags/v}" >> "$GITHUB_OUTPUT"
+
+      - name: Package binaries
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          ARCH="${{ matrix.arch }}"
+
+          mkdir -p dist
+
+          # Package hive
+          tar -czf "dist/gashammer-hive-${VERSION}-linux-${ARCH}.tar.gz" \
+            -C "target/${{ matrix.target }}/release" gashammer-hive
+
+          # Package edge
+          tar -czf "dist/gashammer-edge-${VERSION}-linux-${ARCH}.tar.gz" \
+            -C "target/${{ matrix.target }}/release" gashammer-edge
+
+      - name: Generate checksums
+        run: |
+          cd dist
+          for f in *.tar.gz; do
+            sha256sum "$f" > "${f}.sha256"
+          done
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: binaries-${{ matrix.arch }}
+          path: dist/
+
+  sbom:
+    name: Generate SBOM
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Install cargo-cyclonedx
+        run: cargo install cargo-cyclonedx
+
+      - name: Generate CycloneDX SBOM
+        run: cargo cyclonedx --format json --output-file sbom.json
+
+      - name: Upload SBOM
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom
+          path: sbom.json
+
+  sign:
+    name: Sign Artifacts
+    needs: [build, sbom]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Collect all release files
+        run: |
+          mkdir -p release
+          cp artifacts/binaries-amd64/* release/
+          cp artifacts/binaries-arm64/* release/
+          cp artifacts/sbom/sbom.json release/
+
+      - name: Install minisign
+        run: |
+          curl -sL https://github.com/jedisct1/minisign/releases/download/0.11/minisign-0.11-linux.tar.gz | tar xz
+          sudo mv minisign-linux/x86_64/minisign /usr/local/bin/
+
+      - name: Sign artifacts with Ed25519
+        env:
+          MINISIGN_KEY: ${{ secrets.MINISIGN_SECRET_KEY }}
+          MINISIGN_PASSWORD: ${{ secrets.MINISIGN_PASSWORD }}
+        run: |
+          echo "$MINISIGN_KEY" > minisign.key
+          cd release
+          for f in *.tar.gz sbom.json; do
+            echo "$MINISIGN_PASSWORD" | minisign -S -s ../minisign.key -m "$f" -t "GasHammer release artifact"
+          done
+          rm ../minisign.key
+
+      - name: Upload signed artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release
+          path: release/
+
+  container:
+    name: Container Images
+    needs: [build]
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        binary: [gashammer-hive, gashammer-edge]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Get version from tag
+        id: version
+        run: echo "version=${GITHUB_REF#refs/tags/v}" >> "$GITHUB_OUTPUT"
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Set up QEMU for multi-arch
+        uses: docker/setup-qemu-action@v3
+
+      - name: Build and push container image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          platforms: linux/amd64,linux/arm64
+          build-args: |
+            BINARY=${{ matrix.binary }}
+            VERSION=${{ steps.version.outputs.version }}
+            BUILD_SHA=${{ github.sha }}
+          tags: |
+            ${{ env.IMAGE_PREFIX }}/${{ matrix.binary }}:${{ steps.version.outputs.version }}
+            ${{ env.IMAGE_PREFIX }}/${{ matrix.binary }}:latest
+          labels: |
+            org.opencontainers.image.title=GasHammer
+            org.opencontainers.image.description=Adversarial load testing for Arbitrum Nitro
+            org.opencontainers.image.authors=Don Johnson
+            org.opencontainers.image.url=https://github.com/copyleftdev/gashammer
+            org.opencontainers.image.source=https://github.com/copyleftdev/gashammer
+            org.opencontainers.image.licenses=BSL-1.1
+            org.opencontainers.image.version=${{ steps.version.outputs.version }}
+            org.opencontainers.image.revision=${{ github.sha }}
+
+  release:
+    name: Create GitHub Release
+    needs: [sign, container]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download signed artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: release
+          path: release/
+
+      - name: Get version from tag
+        id: version
+        run: echo "version=${GITHUB_REF#refs/tags/v}" >> "$GITHUB_OUTPUT"
+
+      - name: Generate release notes
+        id: notes
+        run: |
+          PREV_TAG=$(git tag --sort=-creatordate | head -2 | tail -1)
+          if [ -z "$PREV_TAG" ] || [ "$PREV_TAG" = "${{ github.ref_name }}" ]; then
+            RANGE="HEAD"
+          else
+            RANGE="${PREV_TAG}..HEAD"
+          fi
+          {
+            echo "notes<<NOTES_EOF"
+            echo "## GasHammer ${{ steps.version.outputs.version }}"
+            echo ""
+            echo "### Changes"
+            echo ""
+            git log "$RANGE" --pretty=format:"- %s" --no-merges 2>/dev/null || echo "- Initial release"
+            echo ""
+            echo ""
+            echo "### Artifacts"
+            echo ""
+            echo "| File | SHA-256 |"
+            echo "|------|---------|"
+            cd release
+            for f in *.sha256; do
+              HASH=$(cut -d' ' -f1 "$f")
+              FNAME="${f%.sha256}"
+              echo "| \`${FNAME}\` | \`${HASH}\` |"
+            done
+            cd ..
+            echo ""
+            echo "### Container Images"
+            echo ""
+            echo "- \`ghcr.io/copyleftdev/gashammer-hive:${{ steps.version.outputs.version }}\`"
+            echo "- \`ghcr.io/copyleftdev/gashammer-edge:${{ steps.version.outputs.version }}\`"
+            echo ""
+            echo "### Verification"
+            echo ""
+            echo "\`\`\`bash"
+            echo "# Verify checksum"
+            echo "sha256sum -c gashammer-hive-${{ steps.version.outputs.version }}-linux-amd64.tar.gz.sha256"
+            echo ""
+            echo "# Verify signature (requires GasHammer public key)"
+            echo "minisign -Vm gashammer-hive-${{ steps.version.outputs.version }}-linux-amd64.tar.gz -p gashammer.pub"
+            echo "\`\`\`"
+            echo ""
+            echo "---"
+            echo "*GasHammer is a registered trademark of Don Johnson. Licensed under BSL-1.1.*"
+            echo "NOTES_EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "GasHammer v${{ steps.version.outputs.version }}"
+          body: ${{ steps.notes.outputs.notes }}
+          files: release/*
+          draft: false
+          prerelease: ${{ contains(github.ref_name, '-rc') || contains(github.ref_name, '-alpha') || contains(github.ref_name, '-beta') }}
