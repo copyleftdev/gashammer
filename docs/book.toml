@@ -1,0 +1,28 @@
+[book]
+title = "GasHammer Documentation"
+authors = ["Don Johnson"]
+description = "Adversarial load-testing and correctness-verification platform for Arbitrum Nitro"
+language = "en"
+src = "src"
+
+[build]
+build-dir = "book"
+create-missing = false
+
+[output.html]
+default-theme = "navy"
+preferred-dark-theme = "navy"
+git-repository-url = "https://github.com/copyleftdev/gashammer"
+edit-url-template = "https://github.com/copyleftdev/gashammer/edit/main/docs/{path}"
+site-url = "/gashammer/"
+additional-css = []
+additional-js = []
+
+[output.html.search]
+enable = true
+limit-results = 20
+boost-hierarchy = 2
+
+[output.html.fold]
+enable = true
+level = 1
