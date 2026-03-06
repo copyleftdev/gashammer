@@ -17,7 +17,9 @@
 //!
 //! Ref: RFC-0003 §6.
 
+use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Duration;
 
 use axum::extract::{Path, State};
 use axum::http::{header, HeaderValue, StatusCode};
@@ -26,11 +28,13 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
+use tokio::sync::RwLock;
 
 use gashammer_common::build_info::{GASHAMMER_NAME, GASHAMMER_VERSION};
-use gashammer_common::EdgeId;
+use gashammer_common::{EdgeId, RunId, ScenarioId};
 
 use crate::registry::{CapacityClass, EdgeRecord, EdgeRegistry, EdgeStatus, InstanceProfile};
+use crate::run::{Phase, RunConfig, RunOrchestrator, RunState};
 
 // ---------------------------------------------------------------------------
 // API configuration
@@ -58,15 +62,31 @@ impl Default for ApiConfig {
 // Shared application state
 // ---------------------------------------------------------------------------
 
+/// A stored scenario record.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ScenarioRecord {
+    pub scenario_id: ScenarioId,
+    pub name: String,
+    pub description: String,
+    pub definition: serde_json::Value,
+}
+
 /// Shared state available to all API handlers.
 pub struct AppState {
     pub registry: EdgeRegistry,
+    pub orchestrator: RunOrchestrator,
+    pub scenarios: RwLock<HashMap<ScenarioId, ScenarioRecord>>,
     pub api_key: String,
 }
 
 impl AppState {
-    pub fn new(registry: EdgeRegistry, api_key: String) -> Self {
-        Self { registry, api_key }
+    pub fn new(registry: EdgeRegistry, orchestrator: RunOrchestrator, api_key: String) -> Self {
+        Self {
+            registry,
+            orchestrator,
+            scenarios: RwLock::new(HashMap::new()),
+            api_key,
+        }
     }
 }
 
@@ -287,99 +307,313 @@ async fn drain_edge(
 }
 
 // ---------------------------------------------------------------------------
-// Scenario handlers (stubs — implemented with gashammer-scenario)
+// Scenario handlers
 // ---------------------------------------------------------------------------
 
-/// GET /api/v1/scenarios — list scenarios (stub).
-async fn list_scenarios() -> Json<Vec<()>> {
-    Json(vec![])
+/// Response type for scenario listings.
+#[derive(Debug, Serialize, Deserialize)]
+struct ScenarioResponse {
+    scenario_id: String,
+    name: String,
+    description: String,
 }
 
-/// POST /api/v1/scenarios — create a scenario (stub).
-async fn create_scenario() -> (StatusCode, Json<serde_json::Value>) {
-    (
-        StatusCode::NOT_IMPLEMENTED,
-        Json(serde_json::json!({
-            "error": {
-                "code": "NOT_IMPLEMENTED",
-                "message": "scenario creation not yet implemented"
-            }
-        })),
+impl From<ScenarioRecord> for ScenarioResponse {
+    fn from(r: ScenarioRecord) -> Self {
+        Self {
+            scenario_id: r.scenario_id.to_string(),
+            name: r.name,
+            description: r.description,
+        }
+    }
+}
+
+/// Request body for creating a scenario.
+#[derive(Debug, Deserialize)]
+struct CreateScenarioRequest {
+    name: String,
+    #[serde(default)]
+    description: String,
+    definition: serde_json::Value,
+}
+
+/// GET /api/v1/scenarios — list all scenarios.
+async fn list_scenarios(State(state): State<Arc<AppState>>) -> Json<Vec<ScenarioResponse>> {
+    let scenarios = state.scenarios.read().await;
+    Json(
+        scenarios
+            .values()
+            .cloned()
+            .map(ScenarioResponse::from)
+            .collect(),
     )
 }
 
-/// GET /api/v1/scenarios/:id — get scenario details (stub).
-async fn get_scenario(Path(_id): Path<String>) -> (StatusCode, Json<serde_json::Value>) {
-    (
-        StatusCode::NOT_IMPLEMENTED,
-        Json(serde_json::json!({
-            "error": {
-                "code": "NOT_IMPLEMENTED",
-                "message": "scenario retrieval not yet implemented"
-            }
-        })),
-    )
+/// POST /api/v1/scenarios — create a scenario.
+async fn create_scenario(
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<CreateScenarioRequest>,
+) -> Result<(StatusCode, Json<ScenarioResponse>), ApiError> {
+    let scenario_id = ScenarioId::new();
+    let record = ScenarioRecord {
+        scenario_id: scenario_id.clone(),
+        name: body.name,
+        description: body.description,
+        definition: body.definition,
+    };
+
+    let response = ScenarioResponse::from(record.clone());
+    state.scenarios.write().await.insert(scenario_id, record);
+
+    Ok((StatusCode::CREATED, Json(response)))
+}
+
+/// GET /api/v1/scenarios/:id — get scenario details.
+async fn get_scenario(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> Result<Json<ScenarioRecord>, ApiError> {
+    let scenario_id: ScenarioId = id
+        .parse()
+        .map_err(|_| ApiError::new("INVALID_REQUEST", "invalid scenario ID format"))?;
+
+    let scenarios = state.scenarios.read().await;
+    scenarios
+        .get(&scenario_id)
+        .cloned()
+        .map(Json)
+        .ok_or_else(|| {
+            ApiError::new(
+                "SCENARIO_NOT_FOUND",
+                format!("scenario {scenario_id} not found"),
+            )
+        })
 }
 
 // ---------------------------------------------------------------------------
-// Run handlers (stubs — implemented with run orchestrator)
+// Run handlers
 // ---------------------------------------------------------------------------
 
-/// GET /api/v1/runs — list runs (stub).
-async fn list_runs() -> Json<Vec<()>> {
-    Json(vec![])
+/// Request body for creating a run.
+#[derive(Debug, Deserialize)]
+struct CreateRunRequest {
+    scenario_id: String,
+    #[serde(default)]
+    seed: Option<u64>,
+    #[serde(default)]
+    edge_ids: Option<Vec<String>>,
 }
 
-/// POST /api/v1/runs — start a run (stub).
-async fn create_run() -> (StatusCode, Json<serde_json::Value>) {
-    (
-        StatusCode::NOT_IMPLEMENTED,
-        Json(serde_json::json!({
-            "error": {
-                "code": "NOT_IMPLEMENTED",
-                "message": "run creation not yet implemented"
-            }
-        })),
+/// Response type for a run.
+#[derive(Debug, Serialize, Deserialize)]
+struct RunResponse {
+    run_id: String,
+    scenario_id: String,
+    state: RunState,
+    current_phase: usize,
+    timeline_event_count: usize,
+}
+
+/// Response type for run listings.
+#[derive(Debug, Serialize, Deserialize)]
+struct RunListItem {
+    run_id: String,
+    state: RunState,
+}
+
+/// Request body for aborting a run.
+#[derive(Debug, Deserialize)]
+struct AbortRunRequest {
+    #[serde(default = "default_abort_reason")]
+    reason: String,
+}
+
+fn default_abort_reason() -> String {
+    "aborted via API".into()
+}
+
+/// Response type for a run report.
+#[derive(Debug, Serialize, Deserialize)]
+struct RunReportResponse {
+    run_id: String,
+    state: RunState,
+    current_phase: usize,
+    timeline: Vec<RunEventResponse>,
+}
+
+/// A single timeline event in a report.
+#[derive(Debug, Serialize, Deserialize)]
+struct RunEventResponse {
+    timestamp_ms: u64,
+    event_type: String,
+    description: String,
+}
+
+/// GET /api/v1/runs — list all runs.
+async fn list_runs(State(state): State<Arc<AppState>>) -> Json<Vec<RunListItem>> {
+    let runs = state.orchestrator.list_runs().await;
+    Json(
+        runs.into_iter()
+            .map(|(id, st)| RunListItem {
+                run_id: id.to_string(),
+                state: st,
+            })
+            .collect(),
     )
 }
 
-/// GET /api/v1/runs/:id — get run status (stub).
-async fn get_run(Path(_id): Path<String>) -> (StatusCode, Json<serde_json::Value>) {
-    (
-        StatusCode::NOT_IMPLEMENTED,
-        Json(serde_json::json!({
-            "error": {
-                "code": "NOT_IMPLEMENTED",
-                "message": "run status not yet implemented"
+/// POST /api/v1/runs — create and start a run.
+async fn create_run(
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<CreateRunRequest>,
+) -> Result<(StatusCode, Json<RunResponse>), ApiError> {
+    let scenario_id: ScenarioId = body
+        .scenario_id
+        .parse()
+        .map_err(|_| ApiError::new("INVALID_REQUEST", "invalid scenario ID format"))?;
+
+    // Verify scenario exists
+    let scenarios = state.scenarios.read().await;
+    if !scenarios.contains_key(&scenario_id) {
+        return Err(ApiError::new(
+            "SCENARIO_NOT_FOUND",
+            format!("scenario {scenario_id} not found"),
+        ));
+    }
+    drop(scenarios);
+
+    // Resolve edge IDs: use provided list or pick all available
+    let edge_ids = match body.edge_ids {
+        Some(ids) => {
+            let mut parsed = Vec::with_capacity(ids.len());
+            for id_str in &ids {
+                let eid: EdgeId = id_str
+                    .parse()
+                    .map_err(|_| ApiError::new("INVALID_REQUEST", "invalid edge ID format"))?;
+                parsed.push(eid);
             }
-        })),
-    )
+            parsed
+        }
+        None => {
+            let available = state.registry.list_available().await;
+            available.into_iter().map(|r| r.edge_id).collect()
+        }
+    };
+
+    let config = RunConfig {
+        scenario_id: scenario_id.clone(),
+        seed: body.seed.unwrap_or(42),
+        phases: vec![Phase {
+            name: "default".into(),
+            duration: Duration::from_secs(60),
+            target_gas_rate: 1_000_000,
+        }],
+        edge_ids,
+        barrier_timeout: Duration::from_secs(30),
+        max_clock_skew: Duration::from_millis(250),
+    };
+
+    let run_id = state
+        .orchestrator
+        .create_run(config)
+        .await
+        .map_err(|e| ApiError::new("CONFLICT", e.to_string()))?;
+
+    let record =
+        state.orchestrator.get_run(&run_id).await.ok_or_else(|| {
+            ApiError::new("NOT_FOUND", "run was created but could not be retrieved")
+        })?;
+
+    Ok((
+        StatusCode::CREATED,
+        Json(RunResponse {
+            run_id: run_id.to_string(),
+            scenario_id: scenario_id.to_string(),
+            state: record.state,
+            current_phase: record.current_phase,
+            timeline_event_count: record.timeline.len(),
+        }),
+    ))
 }
 
-/// POST /api/v1/runs/:id/abort — abort a run (stub).
-async fn abort_run(Path(_id): Path<String>) -> (StatusCode, Json<serde_json::Value>) {
-    (
-        StatusCode::NOT_IMPLEMENTED,
-        Json(serde_json::json!({
-            "error": {
-                "code": "NOT_IMPLEMENTED",
-                "message": "run abort not yet implemented"
-            }
-        })),
-    )
+/// GET /api/v1/runs/:id — get run status.
+async fn get_run(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> Result<Json<RunResponse>, ApiError> {
+    let run_id: RunId = id
+        .parse()
+        .map_err(|_| ApiError::new("INVALID_REQUEST", "invalid run ID format"))?;
+
+    let record = state
+        .orchestrator
+        .get_run(&run_id)
+        .await
+        .ok_or_else(|| ApiError::new("RUN_NOT_FOUND", format!("run {run_id} not found")))?;
+
+    Ok(Json(RunResponse {
+        run_id: run_id.to_string(),
+        scenario_id: record.config.scenario_id.to_string(),
+        state: record.state,
+        current_phase: record.current_phase,
+        timeline_event_count: record.timeline.len(),
+    }))
 }
 
-/// GET /api/v1/runs/:id/report — get run report (stub).
-async fn get_run_report(Path(_id): Path<String>) -> (StatusCode, Json<serde_json::Value>) {
-    (
-        StatusCode::NOT_IMPLEMENTED,
-        Json(serde_json::json!({
-            "error": {
-                "code": "NOT_IMPLEMENTED",
-                "message": "run report not yet implemented"
-            }
-        })),
-    )
+/// POST /api/v1/runs/:id/abort — abort a run.
+async fn abort_run(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+    body: Option<Json<AbortRunRequest>>,
+) -> Result<StatusCode, ApiError> {
+    let run_id: RunId = id
+        .parse()
+        .map_err(|_| ApiError::new("INVALID_REQUEST", "invalid run ID format"))?;
+
+    let reason = body
+        .map(|b| b.0.reason)
+        .unwrap_or_else(default_abort_reason);
+
+    state
+        .orchestrator
+        .abort_run(&run_id, reason)
+        .await
+        .map_err(|e| ApiError::new("CONFLICT", e.to_string()))?;
+
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// GET /api/v1/runs/:id/report — get run report with timeline.
+async fn get_run_report(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> Result<Json<RunReportResponse>, ApiError> {
+    let run_id: RunId = id
+        .parse()
+        .map_err(|_| ApiError::new("INVALID_REQUEST", "invalid run ID format"))?;
+
+    let record = state
+        .orchestrator
+        .get_run(&run_id)
+        .await
+        .ok_or_else(|| ApiError::new("RUN_NOT_FOUND", format!("run {run_id} not found")))?;
+
+    let timeline = record
+        .timeline
+        .iter()
+        .map(|e| RunEventResponse {
+            timestamp_ms: e.timestamp.as_millis() as u64,
+            event_type: format!("{:?}", e.event_type),
+            description: e.description.clone(),
+        })
+        .collect();
+
+    Ok(Json(RunReportResponse {
+        run_id: run_id.to_string(),
+        state: record.state,
+        current_phase: record.current_phase,
+        timeline,
+    }))
 }
 
 // ---------------------------------------------------------------------------
@@ -423,10 +657,12 @@ mod tests {
     use uuid::Uuid;
 
     use crate::registry::{HeartbeatPayload, RegisterEdgeRequest, RegistryConfig};
+    use crate::run::RunOrchestrator;
 
     fn test_state() -> Arc<AppState> {
         Arc::new(AppState::new(
             EdgeRegistry::new(RegistryConfig::default()),
+            RunOrchestrator::new(),
             String::new(), // no auth in tests
         ))
     }
@@ -434,6 +670,7 @@ mod tests {
     fn test_state_with_auth(key: &str) -> Arc<AppState> {
         Arc::new(AppState::new(
             EdgeRegistry::new(RegistryConfig::default()),
+            RunOrchestrator::new(),
             key.to_string(),
         ))
     }
@@ -778,7 +1015,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_runs_stub_returns_empty() {
+    async fn test_runs_returns_empty() {
         let state = test_state();
         let app = router(state);
 
@@ -793,5 +1030,304 @@ mod tests {
             .unwrap();
 
         assert_eq!(response.status(), StatusCode::OK);
+
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let runs: Vec<RunListItem> = serde_json::from_slice(&body).unwrap();
+        assert!(runs.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_create_and_get_scenario() {
+        let state = test_state();
+        let app = router(state.clone());
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/scenarios")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        serde_json::to_string(&serde_json::json!({
+                            "name": "test-scenario",
+                            "description": "A test scenario",
+                            "definition": {"version": "1"}
+                        }))
+                        .unwrap(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::CREATED);
+
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let scenario: ScenarioResponse = serde_json::from_slice(&body).unwrap();
+        assert_eq!(scenario.name, "test-scenario");
+
+        // Now get it
+        let app = router(state);
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/api/v1/scenarios/{}", scenario.scenario_id))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let record: ScenarioRecord = serde_json::from_slice(&body).unwrap();
+        assert_eq!(record.name, "test-scenario");
+    }
+
+    #[tokio::test]
+    async fn test_get_scenario_not_found() {
+        let state = test_state();
+        let app = router(state);
+        let fake_id = Uuid::new_v4();
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/api/v1/scenarios/{fake_id}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    }
+
+    async fn create_test_scenario(state: &Arc<AppState>) -> ScenarioId {
+        let scenario_id = ScenarioId::new();
+        state.scenarios.write().await.insert(
+            scenario_id.clone(),
+            ScenarioRecord {
+                scenario_id: scenario_id.clone(),
+                name: "test".into(),
+                description: "test scenario".into(),
+                definition: serde_json::json!({"version": "1"}),
+            },
+        );
+        scenario_id
+    }
+
+    #[tokio::test]
+    async fn test_create_run_and_get_status() {
+        let state = test_state();
+        let scenario_id = create_test_scenario(&state).await;
+        let app = router(state.clone());
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/runs")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        serde_json::to_string(&serde_json::json!({
+                            "scenario_id": scenario_id.to_string(),
+                            "seed": 42
+                        }))
+                        .unwrap(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::CREATED);
+
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let run: RunResponse = serde_json::from_slice(&body).unwrap();
+        assert_eq!(run.scenario_id, scenario_id.to_string());
+        assert_eq!(run.state, RunState::Preflight);
+
+        // Get the run
+        let app = router(state);
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/api/v1/runs/{}", run.run_id))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn test_create_run_unknown_scenario_fails() {
+        let state = test_state();
+        let app = router(state);
+        let fake_id = Uuid::new_v4();
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/runs")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        serde_json::to_string(&serde_json::json!({
+                            "scenario_id": fake_id.to_string()
+                        }))
+                        .unwrap(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn test_abort_run() {
+        let state = test_state();
+        let scenario_id = create_test_scenario(&state).await;
+
+        // Create a run
+        let run_id = state
+            .orchestrator
+            .create_run(RunConfig {
+                scenario_id,
+                seed: 42,
+                phases: vec![],
+                edge_ids: vec![],
+                ..RunConfig::default()
+            })
+            .await
+            .unwrap();
+
+        let app = router(state);
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/api/v1/runs/{run_id}/abort"))
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        serde_json::to_string(&serde_json::json!({
+                            "reason": "test abort"
+                        }))
+                        .unwrap(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::NO_CONTENT);
+    }
+
+    #[tokio::test]
+    async fn test_get_run_not_found() {
+        let state = test_state();
+        let app = router(state);
+        let fake_id = Uuid::new_v4();
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/api/v1/runs/{fake_id}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn test_get_run_report() {
+        let state = test_state();
+        let scenario_id = create_test_scenario(&state).await;
+
+        let run_id = state
+            .orchestrator
+            .create_run(RunConfig {
+                scenario_id,
+                seed: 42,
+                phases: vec![],
+                edge_ids: vec![],
+                ..RunConfig::default()
+            })
+            .await
+            .unwrap();
+
+        let app = router(state);
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/api/v1/runs/{run_id}/report"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let report: RunReportResponse = serde_json::from_slice(&body).unwrap();
+        assert_eq!(report.run_id, run_id.to_string());
+        assert!(!report.timeline.is_empty()); // At least PreflightStarted
+    }
+
+    #[tokio::test]
+    async fn test_list_runs_after_creation() {
+        let state = test_state();
+        let scenario_id = create_test_scenario(&state).await;
+
+        state
+            .orchestrator
+            .create_run(RunConfig {
+                scenario_id,
+                seed: 42,
+                phases: vec![],
+                edge_ids: vec![],
+                ..RunConfig::default()
+            })
+            .await
+            .unwrap();
+
+        let app = router(state);
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/v1/runs")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let runs: Vec<RunListItem> = serde_json::from_slice(&body).unwrap();
+        assert_eq!(runs.len(), 1);
     }
 }
