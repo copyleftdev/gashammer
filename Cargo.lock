@@ -1863,8 +1863,11 @@ name = "gashammer-report"
 version = "0.1.0"
 dependencies = [
  "gashammer-common",
+ "serde",
+ "serde_json",
  "thiserror 2.0.18",
  "tracing",
+ "uuid",
 ]
 
 [[package]]
