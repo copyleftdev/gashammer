@@ -313,7 +313,7 @@ impl FaultAdapter for NoopAdapter {
 
 /// Manages fault lifecycle: injection, tracking, auto-clear, and journal.
 pub struct FaultManager {
-    adapters: Vec<Box<dyn FaultAdapter>>,
+    adapters: Arc<Vec<Box<dyn FaultAdapter>>>,
     active: Arc<RwLock<HashMap<Uuid, (usize, FaultHandle)>>>, // (adapter_idx, handle)
     journal: Arc<FaultJournal>,
     metrics: Arc<FaultMetrics>,
@@ -322,7 +322,7 @@ pub struct FaultManager {
 impl FaultManager {
     pub fn new(adapters: Vec<Box<dyn FaultAdapter>>) -> Self {
         Self {
-            adapters,
+            adapters: Arc::new(adapters),
             active: Arc::new(RwLock::new(HashMap::new())),
             journal: Arc::new(FaultJournal::new()),
             metrics: Arc::new(FaultMetrics::default()),
@@ -345,6 +345,7 @@ impl FaultManager {
     /// Find an adapter that supports the given fault type.
     fn find_adapter(&self, fault_type: &FaultType) -> Option<usize> {
         self.adapters
+            .as_ref()
             .iter()
             .position(|a| a.supported_faults().contains(fault_type))
     }
@@ -450,15 +451,15 @@ impl FaultManager {
     }
 
     /// Start auto-clear timer for a fault with a duration.
+    ///
+    /// When the timer fires, the adapter's `clear()` method is called
+    /// to actually revert the fault (not just remove from the active map).
     pub fn start_auto_clear(&self, handle_id: Uuid, duration: Duration) -> JoinHandle<()> {
         let active = Arc::clone(&self.active);
+        let adapters = Arc::clone(&self.adapters);
         let journal = Arc::clone(&self.journal);
         let metrics = Arc::clone(&self.metrics);
-        let adapters_len = self.adapters.len();
 
-        // We can't hold a reference to adapters across the spawn boundary,
-        // so we use indices. This works because FaultManager owns the adapters.
-        // For auto-clear, we'll remove from active and record in journal.
         tokio::spawn(async move {
             tokio::time::sleep(duration).await;
 
@@ -467,7 +468,16 @@ impl FaultManager {
                 active_map.remove(&handle_id)
             };
 
-            if let Some((_adapter_idx, handle)) = entry {
+            if let Some((adapter_idx, handle)) = entry {
+                // Actually clear the fault via the adapter
+                if let Err(e) = adapters[adapter_idx].clear(handle_id).await {
+                    tracing::warn!(
+                        fault_id = %handle_id,
+                        error = %e,
+                        "auto-clear failed for fault"
+                    );
+                }
+
                 journal.record(JournalEntry {
                     timestamp_ms: std::time::SystemTime::now()
                         .duration_since(std::time::UNIX_EPOCH)
@@ -483,15 +493,13 @@ impl FaultManager {
                     .fetch_add(1, Ordering::Relaxed);
                 tracing::info!(fault_id = %handle_id, "fault auto-cleared after timeout");
             }
-
-            let _ = adapters_len; // suppress unused warning
         })
     }
 
     /// Run preflight checks on all adapters.
     pub async fn preflight_all(&self) -> Vec<PreflightResult> {
         let mut results = Vec::new();
-        for adapter in &self.adapters {
+        for adapter in self.adapters.as_ref() {
             results.push(adapter.preflight_check().await);
         }
         results

@@ -12,4 +12,6 @@
 
 pub mod adapter;
 pub mod error;
+pub mod iptables;
+pub mod netem;
 pub mod timeline;
