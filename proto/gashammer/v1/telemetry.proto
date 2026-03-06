@@ -1,0 +1,104 @@
+// Copyright (c) 2025-present Don Johnson
+// Licensed under the Business Source License 1.1 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     https://github.com/copyleftdev/gashammer/blob/main/LICENSE
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// GasHammer is a registered trademark of Don Johnson.
+
+syntax = "proto3";
+package gashammer.v1;
+
+// A transaction was submitted to the sequencer.
+message TxSubmitted {
+  bytes tx_hash = 1;
+  uint64 nonce = 2;
+  uint64 gas_limit = 3;
+  string template_name = 4;
+}
+
+// A transaction appeared in the sequencer feed.
+message TxAccepted {
+  bytes tx_hash = 1;
+  uint64 sequence_number = 2;
+  int64 feed_timestamp_ns = 3;
+}
+
+// A transaction was included in a block.
+message TxIncluded {
+  bytes tx_hash = 1;
+  uint64 block_number = 2;
+  uint64 gas_used = 3;
+  bool reverted = 4;
+}
+
+// A transaction failed (rejected or timed out).
+message TxFailed {
+  bytes tx_hash = 1;
+  string reason = 2;
+}
+
+// A message was received from the sequencer feed.
+message FeedMessage {
+  uint64 sequence_number = 1;
+  uint32 tx_count = 2;
+  int64 timestamp_ns = 3;
+}
+
+// Feed connection was lost.
+message FeedDisconnect {
+  string reason = 1;
+  int64 timestamp_ns = 2;
+}
+
+// A fault was injected.
+message FaultInjected {
+  string fault_type = 1;
+  string target = 2;
+  int64 timestamp_ns = 3;
+}
+
+// A phase started on this edge.
+message PhaseStarted {
+  string run_id = 1;
+  uint32 phase_index = 2;
+  string phase_name = 3;
+  int64 timestamp_ns = 4;
+}
+
+// Telemetry event envelope — one event per edge per observation.
+message TelemetryEvent {
+  string edge_id = 1;
+  string run_id = 2;
+  int64 monotonic_ns = 3;
+  int64 wall_ns = 4;
+  oneof event {
+    TxSubmitted tx_submitted = 10;
+    TxAccepted tx_accepted = 11;
+    TxIncluded tx_included = 12;
+    TxFailed tx_failed = 13;
+    FeedMessage feed_message = 14;
+    FeedDisconnect feed_disconnect = 15;
+    FaultInjected fault_injected = 16;
+    PhaseStarted phase_started = 17;
+  }
+}
+
+// Batch of metric samples.
+message MetricBatch {
+  string edge_id = 1;
+  string run_id = 2;
+  repeated MetricSample samples = 3;
+}
+
+// A single metric observation.
+message MetricSample {
+  string name = 1;
+  double value = 2;
+  int64 timestamp_ns = 3;
+  map<string, string> labels = 4;
+}

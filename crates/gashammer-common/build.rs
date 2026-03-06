@@ -34,4 +34,19 @@ fn main() {
     // Rerun if git HEAD changes
     println!("cargo:rerun-if-changed=../../.git/HEAD");
     println!("cargo:rerun-if-changed=../../.git/refs/");
+
+    // Compile protobuf definitions
+    let proto_root = "../../proto";
+    tonic_build::configure()
+        .build_server(true)
+        .build_client(true)
+        .compile_protos(
+            &[
+                format!("{proto_root}/gashammer/v1/types.proto"),
+                format!("{proto_root}/gashammer/v1/telemetry.proto"),
+                format!("{proto_root}/gashammer/v1/hive_edge.proto"),
+            ],
+            &[proto_root],
+        )
+        .expect("failed to compile protobuf definitions");
 }
