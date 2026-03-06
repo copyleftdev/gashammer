@@ -1,0 +1,60 @@
+# mixed-workload.yaml
+#
+# Multi-template workload mixing transfers, ERC-20 operations, and storage
+# writes. Tests how the sequencer handles diverse transaction types at load.
+#
+# Template weights:
+#   - simple-transfer (30%): baseline ETH transfers
+#   - erc20-transfer (25%): token transfers
+#   - erc20-approve (10%): token approvals
+#   - storage-write (20%): single-slot storage writes
+#   - compute-heavy (15%): CPU-intensive transactions
+#
+# Expected behavior:
+#   - Sustained 8 Mgas/s for 10 minutes
+#   - Mixed transaction types exercise different EVM code paths
+
+version: "1"
+
+scenario:
+  name: mixed-workload
+  description: "Diverse workload mix at 8 Mgas/s — transfers, ERC-20, storage, compute"
+  tags: [mixed, diversity, evm-coverage]
+  seed: 7777
+
+target:
+  sequencer_url: "http://localhost:8547"
+  environment: devnet
+
+phases:
+  - name: ramp-up
+    duration_sec: 60
+    gas_rate:
+      mode: ramped
+      start_gas_per_sec: 1000000
+      end_gas_per_sec: 8000000
+  - name: steady-state
+    duration_sec: 540
+    gas_rate:
+      mode: sustained
+      gas_per_sec: 8000000
+  - name: cooldown
+    duration_sec: 60
+    gas_rate:
+      mode: sustained
+      gas_per_sec: 2000000
+
+edges:
+  min_edges: 1
+  account_count: 500
+
+workload:
+  gas_rate:
+    mode: sustained
+    gas_per_sec: 8000000
+  templates:
+    simple-transfer: 0.30
+    erc20-transfer: 0.25
+    erc20-approve: 0.10
+    storage-write: 0.20
+    compute-heavy: 0.15

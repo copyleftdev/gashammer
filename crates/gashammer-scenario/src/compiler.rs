@@ -484,4 +484,52 @@ faults:
         let parsed: CompiledScenario = serde_json::from_str(&json).expect("deserialize");
         assert_eq!(parsed.name, "test");
     }
+
+    // -----------------------------------------------------------------------
+    // Example scenario validation tests
+    // -----------------------------------------------------------------------
+
+    fn validate_scenario_file(yaml: &str, expected_name: &str) {
+        let compiled = parse_validate_compile(yaml)
+            .unwrap_or_else(|errs| panic!("validation failed for {expected_name}: {errs:?}"));
+        assert_eq!(compiled.name, expected_name);
+        assert!(!compiled.phases.is_empty());
+        assert!(compiled.total_duration_sec > 0);
+    }
+
+    #[test]
+    fn test_example_simple_transfer_load() {
+        let yaml = include_str!("../../../scenarios/simple-transfer-load.yaml");
+        validate_scenario_file(yaml, "simple-transfer-load");
+    }
+
+    #[test]
+    fn test_example_mixed_workload() {
+        let yaml = include_str!("../../../scenarios/mixed-workload.yaml");
+        validate_scenario_file(yaml, "mixed-workload");
+    }
+
+    #[test]
+    fn test_example_ramp_to_saturation() {
+        let yaml = include_str!("../../../scenarios/ramp-to-saturation.yaml");
+        validate_scenario_file(yaml, "ramp-to-saturation");
+    }
+
+    #[test]
+    fn test_example_fault_tolerance() {
+        let yaml = include_str!("../../../scenarios/fault-tolerance.yaml");
+        validate_scenario_file(yaml, "fault-tolerance");
+    }
+
+    #[test]
+    fn test_example_correctness_audit() {
+        let yaml = include_str!("../../../scenarios/correctness-audit.yaml");
+        validate_scenario_file(yaml, "correctness-audit");
+    }
+
+    #[test]
+    fn test_example_quick_smoke_test() {
+        let yaml = include_str!("../../../scenarios/quick-smoke-test.yaml");
+        validate_scenario_file(yaml, "quick-smoke-test");
+    }
 }

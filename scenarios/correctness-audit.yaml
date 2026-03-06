@@ -1,0 +1,69 @@
+# correctness-audit.yaml
+#
+# Low-rate workload with full correctness oracle checks enabled.
+# Designed not for throughput testing but for verifying chain correctness.
+#
+# Oracle checks:
+#   - receipt_status: every tx receipt must have success status
+#   - gas_used_bounds: gas used must be ≤ gas limit
+#   - balance_conservation: ETH must not be created or destroyed
+#   - nonce_consistency: nonces must increment monotonically
+#
+# Expected behavior:
+#   - Low gas rate (500 Kgas/s) to avoid overwhelming the oracle
+#   - 10% cross-observer sampling for multi-path verification
+#   - Zero violations expected on a healthy chain
+#   - Report highlights any invariant violations with evidence
+
+version: "1"
+
+scenario:
+  name: correctness-audit
+  description: "Low-rate correctness verification with full oracle checks"
+  tags: [correctness, oracle, audit, verification]
+  seed: 314159
+
+target:
+  sequencer_url: "http://localhost:8547"
+  gateway_url: "http://localhost:8548"
+  environment: devnet
+
+phases:
+  - name: warmup
+    duration_sec: 30
+    gas_rate:
+      mode: sustained
+      gas_per_sec: 100000
+  - name: audit
+    duration_sec: 300
+    gas_rate:
+      mode: sustained
+      gas_per_sec: 500000
+  - name: cooldown
+    duration_sec: 30
+    gas_rate:
+      mode: sustained
+      gas_per_sec: 100000
+
+edges:
+  min_edges: 1
+  account_count: 50
+
+workload:
+  gas_rate:
+    mode: sustained
+    gas_per_sec: 500000
+  templates:
+    simple-transfer: 0.40
+    erc20-transfer: 0.30
+    storage-write: 0.20
+    noop: 0.10
+
+correctness:
+  invariants:
+    - receipt_status
+    - gas_used_bounds
+    - balance_conservation
+    - nonce_consistency
+  expected_revert_rate: 0.0
+  cross_observer_sample_rate: 0.1

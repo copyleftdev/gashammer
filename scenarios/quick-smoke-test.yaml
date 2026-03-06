@@ -1,0 +1,46 @@
+# quick-smoke-test.yaml
+#
+# Minimal 2-minute smoke test to verify the system is functional.
+# Suitable for CI pipelines and pre-deployment health checks.
+#
+# Expected behavior:
+#   - 30s warmup → 60s steady → 30s cooldown = 2 minutes total
+#   - Low gas rate (1 Mgas/s), simple transfers only
+#   - Should complete quickly with no failures on a healthy chain
+
+version: "1"
+
+scenario:
+  name: quick-smoke-test
+  description: "Minimal 2-minute smoke test for CI and health checks"
+  tags: [smoke, ci, quick]
+  seed: 1
+
+target:
+  sequencer_url: "http://localhost:8547"
+  environment: devnet
+
+phases:
+  - name: warmup
+    duration_sec: 30
+    gas_rate:
+      mode: sustained
+      gas_per_sec: 500000
+  - name: steady
+    duration_sec: 60
+    gas_rate:
+      mode: sustained
+      gas_per_sec: 1000000
+  - name: cooldown
+    duration_sec: 30
+    gas_rate:
+      mode: sustained
+      gas_per_sec: 500000
+
+workload:
+  gas_rate:
+    mode: sustained
+    gas_per_sec: 1000000
+  templates:
+    simple-transfer: 0.7
+    noop: 0.3
