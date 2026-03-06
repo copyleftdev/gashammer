@@ -1,0 +1,93 @@
+# fault-tolerance.yaml
+#
+# Load test with scheduled fault injection to verify sequencer resilience.
+# Injects network faults at specific offsets during steady-state load.
+#
+# Fault schedule:
+#   - 60s: inject 100ms network latency (simulates degraded connectivity)
+#   - 120s: clear latency fault
+#   - 180s: inject feed disconnect (edge loses sequencer feed)
+#   - 210s: clear feed disconnect
+#   - 270s: inject packet loss (10% drop rate)
+#   - 330s: clear packet loss
+#
+# Expected behavior:
+#   - Transactions should still land despite network degradation
+#   - Feed reconnection should occur within timeout
+#   - Report should show latency spikes correlated with fault windows
+
+version: "1"
+
+scenario:
+  name: fault-tolerance
+  description: "Steady load with scheduled network faults — latency, feed disconnect, packet loss"
+  tags: [fault-injection, resilience, chaos]
+  seed: 99999
+
+target:
+  sequencer_url: "http://localhost:8547"
+  environment: devnet
+
+phases:
+  - name: warmup
+    duration_sec: 30
+    gas_rate:
+      mode: sustained
+      gas_per_sec: 2000000
+  - name: steady-with-faults
+    duration_sec: 360
+    gas_rate:
+      mode: sustained
+      gas_per_sec: 5000000
+  - name: recovery
+    duration_sec: 60
+    gas_rate:
+      mode: sustained
+      gas_per_sec: 5000000
+  - name: cooldown
+    duration_sec: 30
+    gas_rate:
+      mode: sustained
+      gas_per_sec: 1000000
+
+edges:
+  min_edges: 1
+  account_count: 200
+
+workload:
+  gas_rate:
+    mode: sustained
+    gas_per_sec: 5000000
+  templates:
+    simple-transfer: 0.60
+    erc20-transfer: 0.25
+    storage-write: 0.15
+
+faults:
+  schedule:
+    # Phase: steady-with-faults starts at t=30s
+    - offset_sec: 60
+      action: inject
+      fault_name: network-latency
+      fault_type: network_latency
+      parameters:
+        delay_ms: "100"
+    - offset_sec: 120
+      action: clear
+      fault_name: network-latency
+    - offset_sec: 180
+      action: inject
+      fault_name: feed-disconnect
+      fault_type: feed_disconnect
+    - offset_sec: 210
+      action: clear
+      fault_name: feed-disconnect
+    - offset_sec: 270
+      action: inject
+      fault_name: packet-loss
+      fault_type: packet_loss
+      parameters:
+        loss_pct: "10"
+    - offset_sec: 330
+      action: clear
+      fault_name: packet-loss

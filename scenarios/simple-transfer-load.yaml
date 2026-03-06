@@ -1,0 +1,45 @@
+# simple-transfer-load.yaml
+#
+# Basic throughput test using simple ETH transfers at a sustained gas rate.
+# Use this as a starting point or smoke test for sequencer throughput.
+#
+# Expected behavior:
+#   - Constant 5 Mgas/s for 5 minutes
+#   - 100% simple-transfer workload
+#   - Single region, default account pool
+
+version: "1"
+
+scenario:
+  name: simple-transfer-load
+  description: "Sustained ETH transfer load at 5 Mgas/s for 5 minutes"
+  tags: [throughput, baseline, simple]
+  seed: 42
+
+target:
+  sequencer_url: "http://localhost:8547"
+  environment: devnet
+
+phases:
+  - name: warmup
+    duration_sec: 30
+    gas_rate:
+      mode: sustained
+      gas_per_sec: 1000000
+  - name: steady-state
+    duration_sec: 270
+    gas_rate:
+      mode: sustained
+      gas_per_sec: 5000000
+  - name: cooldown
+    duration_sec: 30
+    gas_rate:
+      mode: sustained
+      gas_per_sec: 1000000
+
+workload:
+  gas_rate:
+    mode: sustained
+    gas_per_sec: 5000000
+  templates:
+    simple-transfer: 1.0

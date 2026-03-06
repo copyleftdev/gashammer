@@ -1,0 +1,72 @@
+# ramp-to-saturation.yaml
+#
+# Progressive gas rate ramp to discover the sequencer's saturation point.
+# Starts low, ramps through several tiers, then holds at peak to measure
+# behavior under maximum pressure.
+#
+# Use the resulting report to determine the safe operating envelope:
+#   - Where does p99 latency start climbing?
+#   - At what gas rate do transactions begin failing?
+#   - What is the maximum sustainable throughput?
+#
+# Expected behavior:
+#   - Phase 1: gentle ramp from 1 → 10 Mgas/s over 2 minutes
+#   - Phase 2: aggressive ramp from 10 → 30 Mgas/s over 3 minutes
+#   - Phase 3: hold at 30 Mgas/s for 3 minutes (stress soak)
+#   - Phase 4: ramp to 50 Mgas/s over 2 minutes (find the ceiling)
+#   - Phase 5: cooldown
+
+version: "1"
+
+scenario:
+  name: ramp-to-saturation
+  description: "Progressive gas rate ramp to discover sequencer saturation point"
+  tags: [saturation, capacity, envelope]
+  seed: 12345
+
+target:
+  sequencer_url: "http://localhost:8547"
+  environment: devnet
+
+phases:
+  - name: gentle-ramp
+    duration_sec: 120
+    gas_rate:
+      mode: ramped
+      start_gas_per_sec: 1000000
+      end_gas_per_sec: 10000000
+  - name: aggressive-ramp
+    duration_sec: 180
+    gas_rate:
+      mode: ramped
+      start_gas_per_sec: 10000000
+      end_gas_per_sec: 30000000
+  - name: stress-soak
+    duration_sec: 180
+    gas_rate:
+      mode: sustained
+      gas_per_sec: 30000000
+  - name: peak-push
+    duration_sec: 120
+    gas_rate:
+      mode: ramped
+      start_gas_per_sec: 30000000
+      end_gas_per_sec: 50000000
+  - name: cooldown
+    duration_sec: 60
+    gas_rate:
+      mode: sustained
+      gas_per_sec: 5000000
+
+edges:
+  min_edges: 2
+  account_count: 1000
+
+workload:
+  gas_rate:
+    mode: sustained
+    gas_per_sec: 10000000
+  templates:
+    simple-transfer: 0.50
+    storage-write: 0.30
+    compute-heavy: 0.20
