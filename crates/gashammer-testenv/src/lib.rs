@@ -11,5 +11,6 @@
 // GasHammer is a registered trademark of Don Johnson.
 
 pub mod containers;
+pub mod contracts;
 pub mod devnet;
 pub mod error;
