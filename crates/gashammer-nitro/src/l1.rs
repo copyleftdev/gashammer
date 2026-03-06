@@ -22,9 +22,11 @@ use alloy::providers::{Provider, RootProvider};
 use alloy::rpc::types::{BlockNumberOrTag, Filter, Log};
 use alloy::sol;
 use alloy::sol_types::SolEvent;
+use alloy::transports::http::Http;
 use serde::{Deserialize, Serialize};
 
 use crate::error::NitroError;
+use crate::headers;
 
 // ---------------------------------------------------------------------------
 // Solidity ABI definitions (alloy sol! macro)
@@ -184,7 +186,10 @@ impl L1ContractReader {
             .parse()
             .map_err(|e| NitroError::Config(format!("invalid L1 RPC URL: {e}")))?;
 
-        let provider = RootProvider::new_http(url);
+        let client = headers::http_client()?;
+        let http = Http::with_client(client, url);
+        let rpc_client = alloy::rpc::client::RpcClient::new(http, false);
+        let provider = RootProvider::new(rpc_client);
 
         Ok(Self {
             provider,

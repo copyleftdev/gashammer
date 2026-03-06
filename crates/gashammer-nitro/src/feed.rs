@@ -350,13 +350,10 @@ async fn connect_and_consume(
     metrics: &std::sync::Arc<FeedMetrics>,
     last_sequence_number: &mut Option<u64>,
 ) -> Result<(), NitroError> {
-    // Validate URL format before connecting.
-    let _: url::Url = config
-        .url
-        .parse()
-        .map_err(|e| NitroError::Config(format!("invalid feed URL: {e}")))?;
+    // Build WS request with User-Agent and DNA headers.
+    let ws_request = crate::headers::ws_request(&config.url)?;
 
-    let (ws_stream, _response) = tokio_tungstenite::connect_async(&config.url)
+    let (ws_stream, _response) = tokio_tungstenite::connect_async(ws_request)
         .await
         .map_err(|e| NitroError::Feed(format!("WebSocket connect failed: {e}")))?;
 

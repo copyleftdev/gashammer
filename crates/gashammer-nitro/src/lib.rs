@@ -12,5 +12,6 @@
 
 pub mod error;
 pub mod feed;
+pub mod headers;
 pub mod l1;
 pub mod rpc;
