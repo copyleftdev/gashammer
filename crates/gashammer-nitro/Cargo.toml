@@ -21,5 +21,16 @@ futures-util.workspace = true
 reqwest.workspace = true
 url.workspace = true
 
+[[test]]
+name = "integration"
+path = "tests/integration.rs"
+required-features = ["integration"]
+
+[features]
+integration = []
+
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util"] }
+alloy.workspace = true
+gashammer-testenv.workspace = true
+tracing.workspace = true
