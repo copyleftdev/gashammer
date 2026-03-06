@@ -28,6 +28,14 @@ pub enum TestenvError {
     /// GH-E982: Contract deployment failed.
     #[error("GH-E982: contract deployment error: {0}")]
     ContractDeploy(String),
+
+    /// GH-E983: Account funding failed.
+    #[error("GH-E983: funding error: {0}")]
+    Funding(String),
+
+    /// GH-E984: Contract deployment failed.
+    #[error("GH-E984: deployment error: {0}")]
+    Deployment(String),
 }
 
 #[cfg(test)]

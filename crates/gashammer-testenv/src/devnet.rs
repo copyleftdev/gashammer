@@ -12,17 +12,15 @@
 
 //! Nitro devnet orchestrator.
 //!
-//! Boots L1 Geth, Nitro Sequencer, and Feed Relay containers in the correct
-//! order, performs health checks, and pre-funds test accounts.
+//! Boots a Nitro node in `--dev` mode as a self-contained L2-only chain,
+//! performs health checks, and exposes RPC/WS endpoints.
 //! See RFC-0013 §3.
 
 use serde::{Deserialize, Serialize};
 use testcontainers::runners::AsyncRunner;
 use testcontainers::ContainerAsync;
 
-use crate::containers::feed_relay::{FeedRelayImage, FEED_RELAY_PORT};
-use crate::containers::l1_geth::{L1GethImage, L1_RPC_PORT};
-use crate::containers::sequencer::{NitroSequencerImage, SEQUENCER_RPC_PORT};
+use crate::containers::sequencer::{NitroSequencerImage, SEQUENCER_RPC_PORT, SEQUENCER_WS_PORT};
 use crate::error::TestenvError;
 
 /// Number of test accounts to pre-fund.
@@ -34,7 +32,7 @@ pub const DEFAULT_FUND_AMOUNT_ETH: &str = "100";
 /// Devnet deployment profile.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum DevnetProfile {
-    /// L1 Geth + Sequencer + Feed Relay.
+    /// Sequencer in `--dev` mode (self-contained, no L1).
     Minimal,
     /// Minimal + Validator.
     Standard,
@@ -44,20 +42,18 @@ pub enum DevnetProfile {
 
 /// A running Nitro devnet with all components.
 ///
+/// In `--dev` mode the sequencer is a self-contained L2-only node.
 /// Containers are cleaned up when this struct is dropped.
 pub struct NitroDevnet {
     profile: DevnetProfile,
-    l1_geth: ContainerAsync<L1GethImage>,
     sequencer: ContainerAsync<NitroSequencerImage>,
-    feed_relay: ContainerAsync<FeedRelayImage>,
-    l1_rpc_url: String,
     sequencer_rpc_url: String,
-    feed_relay_url: String,
+    sequencer_ws_url: String,
     chain_id: u64,
 }
 
 impl NitroDevnet {
-    /// Boot a minimal devnet: L1 Geth + Sequencer + Feed Relay.
+    /// Boot a minimal devnet: single Nitro node in `--dev` mode.
     pub async fn minimal() -> Result<Self, TestenvError> {
         Self::boot(DevnetProfile::Minimal).await
     }
@@ -72,23 +68,8 @@ impl NitroDevnet {
     async fn boot(profile: DevnetProfile) -> Result<Self, TestenvError> {
         tracing::info!(profile = ?profile, "booting Nitro devnet");
 
-        // 1. Start L1 Geth
-        let l1_geth = L1GethImage::default()
-            .start()
-            .await
-            .map_err(|e| TestenvError::Container(format!("L1 Geth start failed: {e}")))?;
-
-        let l1_host_port = l1_geth
-            .get_host_port_ipv4(L1_RPC_PORT)
-            .await
-            .map_err(|e| TestenvError::Container(format!("L1 Geth port mapping failed: {e}")))?;
-
-        let l1_rpc_url = format!("http://127.0.0.1:{l1_host_port}");
-        tracing::info!(url = %l1_rpc_url, "L1 Geth started");
-
-        // 2. Start Nitro Sequencer
-        let sequencer_image = NitroSequencerImage::new(&l1_rpc_url);
-        let sequencer = sequencer_image
+        // Start Nitro Sequencer in --dev mode (self-contained, no L1 needed)
+        let sequencer = NitroSequencerImage::new()
             .start()
             .await
             .map_err(|e| TestenvError::Container(format!("Sequencer start failed: {e}")))?;
@@ -101,32 +82,23 @@ impl NitroDevnet {
         let sequencer_rpc_url = format!("http://127.0.0.1:{sequencer_host_port}");
         tracing::info!(url = %sequencer_rpc_url, "Sequencer started");
 
-        // 3. Start Feed Relay
-        let feed_relay_image = FeedRelayImage::new(format!("ws://127.0.0.1:{sequencer_host_port}"));
-        let feed_relay = feed_relay_image
-            .start()
+        let ws_host_port = sequencer
+            .get_host_port_ipv4(SEQUENCER_WS_PORT)
             .await
-            .map_err(|e| TestenvError::Container(format!("Feed relay start failed: {e}")))?;
+            .map_err(|e| {
+                TestenvError::Container(format!("Sequencer WS port mapping failed: {e}"))
+            })?;
 
-        let feed_host_port = feed_relay
-            .get_host_port_ipv4(FEED_RELAY_PORT)
-            .await
-            .map_err(|e| TestenvError::Container(format!("Feed relay port mapping failed: {e}")))?;
+        let sequencer_ws_url = format!("ws://127.0.0.1:{ws_host_port}");
 
-        let feed_relay_url = format!("ws://127.0.0.1:{feed_host_port}");
-        tracing::info!(url = %feed_relay_url, "Feed relay started");
-
-        // Default devnet chain ID for Nitro dev-init.
+        // Default devnet chain ID for Nitro --dev mode.
         let chain_id = 412346;
 
         let devnet = Self {
             profile,
-            l1_geth,
             sequencer,
-            feed_relay,
-            l1_rpc_url,
             sequencer_rpc_url,
-            feed_relay_url,
+            sequencer_ws_url,
             chain_id,
         };
 
@@ -141,19 +113,9 @@ impl NitroDevnet {
 
     /// Run health checks on all components.
     pub async fn health_check(&self) -> Result<(), TestenvError> {
-        // Check L1 via eth_chainId
-        rpc_health_check(&self.l1_rpc_url, "L1 Geth").await?;
-
-        // Check Sequencer via eth_blockNumber
         rpc_health_check(&self.sequencer_rpc_url, "Sequencer").await?;
-
         tracing::info!("all health checks passed");
         Ok(())
-    }
-
-    /// Returns the L1 RPC URL.
-    pub fn l1_rpc_url(&self) -> &str {
-        &self.l1_rpc_url
     }
 
     /// Returns the sequencer RPC URL.
@@ -161,9 +123,9 @@ impl NitroDevnet {
         &self.sequencer_rpc_url
     }
 
-    /// Returns the feed relay WebSocket URL.
-    pub fn feed_relay_url(&self) -> &str {
-        &self.feed_relay_url
+    /// Returns the sequencer WebSocket URL.
+    pub fn sequencer_ws_url(&self) -> &str {
+        &self.sequencer_ws_url
     }
 
     /// Returns the L2 chain ID.
@@ -179,11 +141,8 @@ impl NitroDevnet {
     /// Returns the number of running containers.
     /// Container handles are held to prevent premature shutdown on Drop.
     pub fn container_count(&self) -> usize {
-        // These fields exist to keep containers alive via Drop.
-        let _ = &self.l1_geth;
         let _ = &self.sequencer;
-        let _ = &self.feed_relay;
-        3
+        1
     }
 }
 
@@ -191,9 +150,8 @@ impl std::fmt::Debug for NitroDevnet {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("NitroDevnet")
             .field("profile", &self.profile)
-            .field("l1_rpc_url", &self.l1_rpc_url)
             .field("sequencer_rpc_url", &self.sequencer_rpc_url)
-            .field("feed_relay_url", &self.feed_relay_url)
+            .field("sequencer_ws_url", &self.sequencer_ws_url)
             .field("chain_id", &self.chain_id)
             .finish()
     }
