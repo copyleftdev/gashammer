@@ -1,0 +1,19 @@
+[package]
+name = "gashammer-workload"
+description = "Workload engine — transaction templates, gas modeling, rate control"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+gashammer-common.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+alloy.workspace = true
+rand.workspace = true
+rand_chacha.workspace = true

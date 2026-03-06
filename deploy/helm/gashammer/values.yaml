@@ -1,0 +1,129 @@
+# GasHammer Helm chart default values.
+
+# -- Hive (control plane) configuration
+hive:
+  # -- Number of hive replicas (typically 1)
+  replicaCount: 1
+
+  image:
+    repository: ghcr.io/copyleftdev/gashammer-hive
+    # -- Defaults to chart appVersion
+    tag: ""
+    pullPolicy: IfNotPresent
+
+  service:
+    type: ClusterIP
+    restPort: 8080
+    grpcPort: 9090
+
+  resources:
+    requests:
+      cpu: 500m
+      memory: 512Mi
+    limits:
+      cpu: "2"
+      memory: 2Gi
+
+  config:
+    server:
+      bind_address: "0.0.0.0"
+      rest_port: 8080
+      grpc_port: 9090
+    storage:
+      data_dir: /var/lib/gashammer
+      parquet_rotation_size_mb: 256
+      parquet_rotation_interval_secs: 3600
+    telemetry:
+      prometheus_port: 9091
+    logging:
+      level: info
+      format: json
+
+  # -- Additional environment variables for the hive
+  extraEnv: []
+
+  # -- Node selector for hive pods
+  nodeSelector: {}
+
+  # -- Tolerations for hive pods
+  tolerations: []
+
+  # -- Affinity rules for hive pods
+  affinity: {}
+
+# -- Edge (worker) configuration
+edge:
+  # -- Number of edge replicas
+  replicaCount: 1
+
+  image:
+    repository: ghcr.io/copyleftdev/gashammer-edge
+    # -- Defaults to chart appVersion
+    tag: ""
+    pullPolicy: IfNotPresent
+
+  resources:
+    requests:
+      cpu: 500m
+      memory: 256Mi
+    limits:
+      cpu: "2"
+      memory: 1Gi
+
+  config:
+    edge:
+      name: edge-default
+    hive:
+      address: gashammer-hive:9090
+    nitro:
+      sequencer_rpc: http://sequencer:8547
+      gateway_rpc: http://gateway:8547
+      feed_relay: ws://feed-relay:9642
+      rpc:
+        timeout_ms: 5000
+        max_retries: 3
+        connection_pool_size: 16
+    accounts:
+      count: 100
+      derivation_base: "m/44'/60'/0'/0'/0x4748"
+    telemetry:
+      buffer_size: 65536
+      batch_size: 1024
+      flush_interval_ms: 1000
+      prometheus_port: 9091
+    logging:
+      level: info
+      format: json
+
+  # -- Additional environment variables for the edge
+  extraEnv: []
+
+  # -- Node selector for edge pods
+  nodeSelector: {}
+
+  # -- Tolerations for edge pods
+  tolerations: []
+
+  # -- Affinity rules for edge pods
+  affinity: {}
+
+# -- Image pull secrets
+imagePullSecrets: []
+
+# -- Secret references
+secrets:
+  # -- Name of existing secret containing TLS certificates
+  tlsSecretName: ""
+  # -- Name of existing secret containing account mnemonic
+  accountSecretName: ""
+  # -- Key in the account secret for the mnemonic
+  accountSecretKey: mnemonic
+
+# -- ServiceMonitor for Prometheus Operator
+serviceMonitor:
+  # -- Enable ServiceMonitor creation
+  enabled: false
+  # -- Scrape interval
+  interval: 15s
+  # -- Additional labels for the ServiceMonitor
+  additionalLabels: {}

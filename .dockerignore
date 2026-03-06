@@ -1,0 +1,7 @@
+target/
+.git/
+docs/
+rfcs/
+.claude/
+*.md
+!CLAUDE.md

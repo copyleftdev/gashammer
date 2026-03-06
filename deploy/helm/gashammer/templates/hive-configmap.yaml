@@ -1,0 +1,24 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "gashammer.fullname" . }}-hive-config
+  labels:
+    {{- include "gashammer.hive.labels" . | nindent 4 }}
+data:
+  hive.toml: |
+    [server]
+    bind_address = {{ .Values.hive.config.server.bind_address | quote }}
+    rest_port = {{ .Values.hive.config.server.rest_port }}
+    grpc_port = {{ .Values.hive.config.server.grpc_port }}
+
+    [storage]
+    data_dir = {{ .Values.hive.config.storage.data_dir | quote }}
+    parquet_rotation_size_mb = {{ .Values.hive.config.storage.parquet_rotation_size_mb }}
+    parquet_rotation_interval_secs = {{ .Values.hive.config.storage.parquet_rotation_interval_secs }}
+
+    [telemetry]
+    prometheus_port = {{ .Values.hive.config.telemetry.prometheus_port }}
+
+    [logging]
+    level = {{ .Values.hive.config.logging.level | quote }}
+    format = {{ .Values.hive.config.logging.format | quote }}

@@ -1,0 +1,17 @@
+[package]
+name = "gashammer-docgen"
+description = "Documentation engine — source parser, mdBook page generator"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+gashammer-common.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+syn = { version = "2", features = ["full", "parsing", "visit"] }

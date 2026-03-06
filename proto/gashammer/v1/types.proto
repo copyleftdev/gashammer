@@ -1,0 +1,63 @@
+// Copyright (c) 2025-present Don Johnson
+// Licensed under the Business Source License 1.1 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     https://github.com/copyleftdev/gashammer/blob/main/LICENSE
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// GasHammer is a registered trademark of Don Johnson.
+
+syntax = "proto3";
+package gashammer.v1;
+
+// Instance resource profile reported by an edge at registration.
+message InstanceProfile {
+  uint32 cpu_cores = 1;
+  uint64 memory_bytes = 2;
+  string architecture = 3;
+  string os = 4;
+}
+
+// Workload slice assigned to an edge for a run.
+message WorkloadSlice {
+  string run_id = 1;
+  string scenario_yaml = 2;
+  uint32 account_offset = 3;
+  uint32 account_count = 4;
+  uint64 target_gas_per_sec = 5;
+  uint64 seed = 6;
+}
+
+// Barrier preparation message from hive to edge.
+message PrepareBarrier {
+  string run_id = 1;
+  string barrier_id = 2;
+}
+
+// Barrier release with synchronized start time.
+message ReleaseBarrier {
+  string run_id = 1;
+  int64 start_timestamp_ns = 2;
+}
+
+// Phase transition notification.
+message PhaseTransition {
+  string run_id = 1;
+  uint32 phase_index = 2;
+  string phase_name = 3;
+  int64 transition_timestamp_ns = 4;
+}
+
+// Abort run command.
+message AbortRun {
+  string run_id = 1;
+  string reason = 2;
+}
+
+// Drain edge command — stop accepting new work, finish in-flight.
+message DrainEdge {
+  string reason = 1;
+}

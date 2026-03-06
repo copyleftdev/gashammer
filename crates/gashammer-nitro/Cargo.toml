@@ -1,0 +1,36 @@
+[package]
+name = "gashammer-nitro"
+description = "Nitro protocol adapters — RPC provider, feed consumer, L1 contract reader"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+gashammer-common.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+alloy.workspace = true
+tokio-tungstenite.workspace = true
+futures-util.workspace = true
+reqwest.workspace = true
+url.workspace = true
+
+[[test]]
+name = "integration"
+path = "tests/integration.rs"
+required-features = ["integration"]
+
+[features]
+integration = []
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util"] }
+alloy.workspace = true
+gashammer-testenv.workspace = true
+tracing.workspace = true

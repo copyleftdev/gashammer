@@ -1,0 +1,18 @@
+[package]
+name = "gashammer-telemetry"
+description = "Telemetry pipeline — event model, metrics, Parquet storage"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+gashammer-common.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+uuid.workspace = true
+tokio.workspace = true
