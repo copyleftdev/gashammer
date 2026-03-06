@@ -30,6 +30,7 @@ serde_json = "1"
 tokio = { version = "1", features = ["full"] }
 tracing = "0.1"
 uuid = { version = "1", features = ["v4", "serde"] }
+proptest = "1"
 
 # Workspace crates
 gashammer-common = { path = "crates/gashammer-common" }

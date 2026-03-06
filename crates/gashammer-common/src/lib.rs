@@ -11,3 +11,6 @@
 // GasHammer is a registered trademark of Don Johnson.
 
 pub mod error;
+pub mod types;
+
+pub use types::{EdgeId, GasRate, PhaseId, RunId, ScenarioId, TxCount};
