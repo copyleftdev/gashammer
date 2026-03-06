@@ -1,0 +1,66 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "gashammer.fullname" . }}-edge
+  labels:
+    {{- include "gashammer.edge.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.edge.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "gashammer.edge.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "gashammer.edge.labels" . | nindent 8 }}
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/edge-configmap.yaml") . | sha256sum }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: edge
+          image: {{ include "gashammer.edge.image" . }}
+          imagePullPolicy: {{ .Values.edge.image.pullPolicy }}
+          args:
+            - --config
+            - /etc/gashammer/edge.toml
+          ports:
+            - name: metrics
+              containerPort: {{ .Values.edge.config.telemetry.prometheus_port }}
+              protocol: TCP
+          resources:
+            {{- toYaml .Values.edge.resources | nindent 12 }}
+          volumeMounts:
+            - name: config
+              mountPath: /etc/gashammer
+              readOnly: true
+          {{- if .Values.secrets.accountSecretName }}
+          env:
+            - name: GASHAMMER_ACCOUNTS_MNEMONIC
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secrets.accountSecretName }}
+                  key: {{ .Values.secrets.accountSecretKey }}
+          {{- end }}
+          {{- with .Values.edge.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "gashammer.fullname" . }}-edge-config
+      {{- with .Values.edge.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.edge.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.edge.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

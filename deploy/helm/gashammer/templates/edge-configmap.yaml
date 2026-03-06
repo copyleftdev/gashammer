@@ -1,0 +1,37 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "gashammer.fullname" . }}-edge-config
+  labels:
+    {{- include "gashammer.edge.labels" . | nindent 4 }}
+data:
+  edge.toml: |
+    [edge]
+    name = {{ .Values.edge.config.edge.name | quote }}
+
+    [hive]
+    address = {{ .Values.edge.config.hive.address | quote }}
+
+    [nitro]
+    sequencer_rpc = {{ .Values.edge.config.nitro.sequencer_rpc | quote }}
+    gateway_rpc = {{ .Values.edge.config.nitro.gateway_rpc | quote }}
+    feed_relay = {{ .Values.edge.config.nitro.feed_relay | quote }}
+
+    [nitro.rpc]
+    timeout_ms = {{ .Values.edge.config.nitro.rpc.timeout_ms }}
+    max_retries = {{ .Values.edge.config.nitro.rpc.max_retries }}
+    connection_pool_size = {{ .Values.edge.config.nitro.rpc.connection_pool_size }}
+
+    [accounts]
+    count = {{ .Values.edge.config.accounts.count }}
+    derivation_base = {{ .Values.edge.config.accounts.derivation_base | quote }}
+
+    [telemetry]
+    buffer_size = {{ .Values.edge.config.telemetry.buffer_size }}
+    batch_size = {{ .Values.edge.config.telemetry.batch_size }}
+    flush_interval_ms = {{ .Values.edge.config.telemetry.flush_interval_ms }}
+    prometheus_port = {{ .Values.edge.config.telemetry.prometheus_port }}
+
+    [logging]
+    level = {{ .Values.edge.config.logging.level | quote }}
+    format = {{ .Values.edge.config.logging.format | quote }}
