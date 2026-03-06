@@ -1789,6 +1789,7 @@ dependencies = [
 name = "gashammer-edge"
 version = "0.1.0"
 dependencies = [
+ "alloy",
  "clap",
  "gashammer-common",
  "gashammer-nitro",
