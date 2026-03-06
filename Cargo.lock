@@ -1781,6 +1781,9 @@ name = "gashammer-docgen"
 version = "0.1.0"
 dependencies = [
  "gashammer-common",
+ "serde",
+ "serde_json",
+ "syn 2.0.117",
  "thiserror 2.0.18",
  "tracing",
 ]
