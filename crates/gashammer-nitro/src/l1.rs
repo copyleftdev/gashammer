@@ -15,6 +15,8 @@
 //! Monitors batch posting activity and assertion chain progress on L1.
 //! See RFC-0001 §6–7.
 
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 use std::time::Duration;
 
 use alloy::primitives::{Address, B256, U256};
@@ -24,6 +26,8 @@ use alloy::sol;
 use alloy::sol_types::SolEvent;
 use alloy::transports::http::Http;
 use serde::{Deserialize, Serialize};
+use tokio::sync::mpsc;
+use tokio::task::JoinHandle;
 
 use crate::error::NitroError;
 use crate::headers;
@@ -415,6 +419,222 @@ fn decode_assertion_confirmed(log: &Log) -> Result<AssertionEvent, NitroError> {
     })
 }
 
+// ---------------------------------------------------------------------------
+// L1 monitor events
+// ---------------------------------------------------------------------------
+
+/// Events emitted by the L1 monitor poll loop.
+#[derive(Debug, Clone)]
+pub enum L1Event {
+    /// New batch(es) detected on L1.
+    BatchDelivered {
+        events: Vec<BatchDeliveredEvent>,
+        poll_block: u64,
+    },
+    /// Assertion event(s) detected on L1.
+    AssertionUpdate {
+        events: Vec<AssertionEvent>,
+        poll_block: u64,
+    },
+    /// Poll error (non-fatal — monitor retries on next tick).
+    PollError { error: String },
+}
+
+// ---------------------------------------------------------------------------
+// L1 monitor metrics
+// ---------------------------------------------------------------------------
+
+/// Metrics for the L1 monitor.
+#[derive(Debug, Default)]
+pub struct L1MonitorMetrics {
+    pub gashammer_l1_polls: AtomicU64,
+    pub gashammer_l1_batches_seen: AtomicU64,
+    pub gashammer_l1_assertions_seen: AtomicU64,
+    pub gashammer_l1_poll_errors: AtomicU64,
+}
+
+impl L1MonitorMetrics {
+    pub fn polls(&self) -> u64 {
+        self.gashammer_l1_polls.load(Ordering::Relaxed)
+    }
+
+    pub fn batches_seen(&self) -> u64 {
+        self.gashammer_l1_batches_seen.load(Ordering::Relaxed)
+    }
+
+    pub fn assertions_seen(&self) -> u64 {
+        self.gashammer_l1_assertions_seen.load(Ordering::Relaxed)
+    }
+
+    pub fn poll_errors(&self) -> u64 {
+        self.gashammer_l1_poll_errors.load(Ordering::Relaxed)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// L1 monitor
+// ---------------------------------------------------------------------------
+
+/// Background L1 monitor that polls SequencerInbox and RollupCore contracts
+/// at a configurable interval and emits events via a channel.
+///
+/// Ref: RFC-0001 §6–7.
+pub struct L1Monitor {
+    config: L1Config,
+    metrics: Arc<L1MonitorMetrics>,
+}
+
+impl L1Monitor {
+    /// Create a new L1 monitor.
+    pub fn new(config: L1Config) -> Self {
+        Self {
+            config,
+            metrics: Arc::new(L1MonitorMetrics::default()),
+        }
+    }
+
+    /// Returns a reference to the monitor metrics.
+    pub fn metrics(&self) -> &Arc<L1MonitorMetrics> {
+        &self.metrics
+    }
+
+    /// Start the background polling task.
+    ///
+    /// Returns a `JoinHandle` (must be stored per project conventions) and
+    /// a receiver for L1 events.
+    pub fn start(&self, event_tx: mpsc::Sender<L1Event>) -> Result<JoinHandle<()>, NitroError> {
+        let reader = L1ContractReader::new(self.config.clone())?;
+        let poll_interval = self.config.poll_interval();
+        let lookback = self.config.lookback_blocks;
+        let metrics = Arc::clone(&self.metrics);
+
+        let handle = tokio::spawn(async move {
+            tracing::info!(
+                poll_interval_ms = poll_interval.as_millis() as u64,
+                lookback_blocks = lookback,
+                "L1 monitor started"
+            );
+
+            let mut ticker = tokio::time::interval(poll_interval);
+            let mut last_polled_block: u64 = 0;
+
+            loop {
+                ticker.tick().await;
+                metrics.gashammer_l1_polls.fetch_add(1, Ordering::Relaxed);
+
+                // Get current block number
+                let current_block = match reader.provider.get_block_number().await {
+                    Ok(n) => n,
+                    Err(e) => {
+                        metrics
+                            .gashammer_l1_poll_errors
+                            .fetch_add(1, Ordering::Relaxed);
+                        let _ = event_tx
+                            .send(L1Event::PollError {
+                                error: format!("get_block_number failed: {e}"),
+                            })
+                            .await;
+                        continue;
+                    }
+                };
+
+                let from_block = if last_polled_block == 0 {
+                    current_block.saturating_sub(lookback)
+                } else {
+                    last_polled_block + 1
+                };
+
+                if from_block > current_block {
+                    continue;
+                }
+
+                let from = BlockNumberOrTag::Number(from_block);
+                let to = BlockNumberOrTag::Number(current_block);
+
+                // Fetch batch events
+                match reader.get_batch_events(from, to).await {
+                    Ok(events) if !events.is_empty() => {
+                        let count = events.len() as u64;
+                        metrics
+                            .gashammer_l1_batches_seen
+                            .fetch_add(count, Ordering::Relaxed);
+                        tracing::info!(
+                            batch_count = count,
+                            from_block,
+                            to_block = current_block,
+                            "L1 batch events detected"
+                        );
+                        if event_tx
+                            .send(L1Event::BatchDelivered {
+                                events,
+                                poll_block: current_block,
+                            })
+                            .await
+                            .is_err()
+                        {
+                            tracing::info!("L1 event channel closed, monitor exiting");
+                            break;
+                        }
+                    }
+                    Ok(_) => {} // no events
+                    Err(e) => {
+                        metrics
+                            .gashammer_l1_poll_errors
+                            .fetch_add(1, Ordering::Relaxed);
+                        let _ = event_tx
+                            .send(L1Event::PollError {
+                                error: format!("get_batch_events failed: {e}"),
+                            })
+                            .await;
+                    }
+                }
+
+                // Fetch assertion events
+                match reader.get_assertion_events(from, to).await {
+                    Ok(events) if !events.is_empty() => {
+                        let count = events.len() as u64;
+                        metrics
+                            .gashammer_l1_assertions_seen
+                            .fetch_add(count, Ordering::Relaxed);
+                        tracing::info!(
+                            assertion_count = count,
+                            from_block,
+                            to_block = current_block,
+                            "L1 assertion events detected"
+                        );
+                        if event_tx
+                            .send(L1Event::AssertionUpdate {
+                                events,
+                                poll_block: current_block,
+                            })
+                            .await
+                            .is_err()
+                        {
+                            tracing::info!("L1 event channel closed, monitor exiting");
+                            break;
+                        }
+                    }
+                    Ok(_) => {} // no events
+                    Err(e) => {
+                        metrics
+                            .gashammer_l1_poll_errors
+                            .fetch_add(1, Ordering::Relaxed);
+                        let _ = event_tx
+                            .send(L1Event::PollError {
+                                error: format!("get_assertion_events failed: {e}"),
+                            })
+                            .await;
+                    }
+                }
+
+                last_polled_block = current_block;
+            }
+        });
+
+        Ok(handle)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -536,5 +756,122 @@ mod tests {
         assert_ne!(batch_sig, created_sig);
         assert_ne!(batch_sig, confirmed_sig);
         assert_ne!(created_sig, confirmed_sig);
+    }
+
+    // -----------------------------------------------------------------------
+    // L1Monitor tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_monitor_construction() {
+        let config = test_config();
+        let monitor = L1Monitor::new(config);
+        assert_eq!(monitor.metrics().polls(), 0);
+        assert_eq!(monitor.metrics().batches_seen(), 0);
+        assert_eq!(monitor.metrics().assertions_seen(), 0);
+        assert_eq!(monitor.metrics().poll_errors(), 0);
+    }
+
+    #[test]
+    fn test_monitor_metrics_default() {
+        let m = L1MonitorMetrics::default();
+        assert_eq!(m.polls(), 0);
+        assert_eq!(m.batches_seen(), 0);
+        assert_eq!(m.assertions_seen(), 0);
+        assert_eq!(m.poll_errors(), 0);
+    }
+
+    #[test]
+    fn test_monitor_metrics_increment() {
+        let m = L1MonitorMetrics::default();
+        m.gashammer_l1_polls.fetch_add(3, Ordering::Relaxed);
+        m.gashammer_l1_batches_seen.fetch_add(10, Ordering::Relaxed);
+        m.gashammer_l1_assertions_seen
+            .fetch_add(2, Ordering::Relaxed);
+        m.gashammer_l1_poll_errors.fetch_add(1, Ordering::Relaxed);
+
+        assert_eq!(m.polls(), 3);
+        assert_eq!(m.batches_seen(), 10);
+        assert_eq!(m.assertions_seen(), 2);
+        assert_eq!(m.poll_errors(), 1);
+    }
+
+    #[test]
+    fn test_l1_event_debug() {
+        let ev = L1Event::PollError {
+            error: "timeout".into(),
+        };
+        let dbg = format!("{ev:?}");
+        assert!(dbg.contains("PollError"));
+        assert!(dbg.contains("timeout"));
+    }
+
+    #[test]
+    fn test_l1_event_batch_delivered() {
+        let ev = L1Event::BatchDelivered {
+            events: vec![BatchDeliveredEvent {
+                batch_sequence_number: U256::from(42u64),
+                before_acc: B256::ZERO,
+                after_acc: B256::ZERO,
+                delayed_acc: B256::ZERO,
+                after_delayed_messages_read: U256::ZERO,
+                time_bounds_min: 0,
+                time_bounds_max: 0,
+                data_location: 0,
+                l1_block_number: Some(100),
+                l1_tx_hash: Some(B256::ZERO),
+            }],
+            poll_block: 100,
+        };
+        if let L1Event::BatchDelivered { events, poll_block } = &ev {
+            assert_eq!(events.len(), 1);
+            assert_eq!(events[0].batch_sequence_number, U256::from(42u64));
+            assert_eq!(*poll_block, 100);
+        } else {
+            panic!("expected BatchDelivered");
+        }
+    }
+
+    #[test]
+    fn test_l1_event_assertion_update() {
+        let ev = L1Event::AssertionUpdate {
+            events: vec![AssertionEvent {
+                kind: AssertionEventKind::Created,
+                assertion_hash: B256::ZERO,
+                l1_block_number: Some(200),
+                l1_tx_hash: Some(B256::ZERO),
+            }],
+            poll_block: 200,
+        };
+        if let L1Event::AssertionUpdate { events, poll_block } = &ev {
+            assert_eq!(events.len(), 1);
+            assert_eq!(events[0].assertion_hash, B256::ZERO);
+            assert_eq!(events[0].kind, AssertionEventKind::Created);
+            assert_eq!(*poll_block, 200);
+        } else {
+            panic!("expected AssertionUpdate");
+        }
+    }
+
+    #[test]
+    fn test_l1_event_clone() {
+        let ev = L1Event::PollError {
+            error: "clone test".into(),
+        };
+        let ev2 = ev.clone();
+        if let L1Event::PollError { error } = ev2 {
+            assert_eq!(error, "clone test");
+        } else {
+            panic!("expected PollError");
+        }
+    }
+
+    #[test]
+    fn test_monitor_metrics_shared_across_arc() {
+        let config = test_config();
+        let monitor = L1Monitor::new(config);
+        let metrics = Arc::clone(monitor.metrics());
+        metrics.gashammer_l1_polls.fetch_add(5, Ordering::Relaxed);
+        assert_eq!(monitor.metrics().polls(), 5);
     }
 }
