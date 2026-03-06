@@ -12,3 +12,11 @@ authors.workspace = true
 gashammer-common.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+alloy.workspace = true
+url.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util"] }

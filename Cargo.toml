@@ -25,12 +25,14 @@ authors = ["Don Johnson <copyleftdev@github.com>"]
 
 [workspace.dependencies]
 thiserror = "2"
-serde = { version = "1", features = ["derive"] }
+serde = { version = "=1.0.217", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["full"] }
 tracing = "0.1"
 uuid = { version = "1", features = ["v4", "serde"] }
 proptest = "1"
+alloy = { version = "0.12", features = ["provider-http", "rpc-types", "signers", "signer-local", "consensus", "network"] }
+url = "2"
 
 # Workspace crates
 gashammer-common = { path = "crates/gashammer-common" }

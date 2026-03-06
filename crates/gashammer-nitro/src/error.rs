@@ -17,9 +17,9 @@ use thiserror::Error;
 /// Error code range: GH-E100 through GH-E199.
 #[derive(Debug, Error)]
 pub enum NitroError {
-    /// GH-E100: JSON-RPC call failed.
-    #[error("GH-E100: RPC error: {0}")]
-    Rpc(String),
+    /// GH-E100: JSON-RPC transport error.
+    #[error("GH-E100: RPC transport error: {0}")]
+    Transport(String),
 
     /// GH-E101: Sequencer feed connection or parsing failed.
     #[error("GH-E101: feed error: {0}")]
@@ -28,6 +28,26 @@ pub enum NitroError {
     /// GH-E102: L1 contract read failed.
     #[error("GH-E102: L1 contract error: {0}")]
     L1Contract(String),
+
+    /// GH-E103: RPC request timed out.
+    #[error("GH-E103: RPC timeout: {0}")]
+    Timeout(String),
+
+    /// GH-E104: Rate limited by the target node.
+    #[error("GH-E104: rate limited: {0}")]
+    RateLimited(String),
+
+    /// GH-E105: Invalid RPC response.
+    #[error("GH-E105: invalid response: {0}")]
+    InvalidResponse(String),
+
+    /// GH-E106: Health check failed.
+    #[error("GH-E106: health check failed: {0}")]
+    HealthCheck(String),
+
+    /// GH-E107: Invalid configuration.
+    #[error("GH-E107: invalid config: {0}")]
+    Config(String),
 }
 
 #[cfg(test)]
@@ -36,9 +56,21 @@ mod tests {
 
     #[test]
     fn test_error_display_includes_code() {
-        let err = NitroError::Rpc("connection refused".into());
+        let err = NitroError::Transport("connection refused".into());
         let msg = err.to_string();
         assert!(msg.contains("GH-E100"));
         assert!(msg.contains("connection refused"));
+    }
+
+    #[test]
+    fn test_timeout_error() {
+        let err = NitroError::Timeout("eth_getTransactionReceipt after 30s".into());
+        assert!(err.to_string().contains("GH-E103"));
+    }
+
+    #[test]
+    fn test_rate_limited_error() {
+        let err = NitroError::RateLimited("429 Too Many Requests".into());
+        assert!(err.to_string().contains("GH-E104"));
     }
 }
