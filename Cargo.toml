@@ -1,0 +1,46 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/gashammer-common",
+    "crates/gashammer-nitro",
+    "crates/gashammer-edge",
+    "crates/gashammer-hive",
+    "crates/gashammer-workload",
+    "crates/gashammer-telemetry",
+    "crates/gashammer-oracle",
+    "crates/gashammer-fault",
+    "crates/gashammer-report",
+    "crates/gashammer-scenario",
+    "crates/gashammer-docgen",
+    "crates/gashammer-testenv",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.75.0"
+license = "BSL-1.1"
+repository = "https://github.com/copyleftdev/gashammer"
+authors = ["Don Johnson <copyleftdev@github.com>"]
+
+[workspace.dependencies]
+thiserror = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["full"] }
+tracing = "0.1"
+uuid = { version = "1", features = ["v4", "serde"] }
+
+# Workspace crates
+gashammer-common = { path = "crates/gashammer-common" }
+gashammer-nitro = { path = "crates/gashammer-nitro" }
+gashammer-edge = { path = "crates/gashammer-edge" }
+gashammer-hive = { path = "crates/gashammer-hive" }
+gashammer-workload = { path = "crates/gashammer-workload" }
+gashammer-telemetry = { path = "crates/gashammer-telemetry" }
+gashammer-oracle = { path = "crates/gashammer-oracle" }
+gashammer-fault = { path = "crates/gashammer-fault" }
+gashammer-report = { path = "crates/gashammer-report" }
+gashammer-scenario = { path = "crates/gashammer-scenario" }
+gashammer-docgen = { path = "crates/gashammer-docgen" }
+gashammer-testenv = { path = "crates/gashammer-testenv" }
