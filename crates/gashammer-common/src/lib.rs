@@ -12,7 +12,9 @@
 
 pub mod build_info;
 pub mod error;
+pub mod error_code;
 pub mod types;
 
 pub use build_info::{build_info, version_banner, BuildInfo};
+pub use error_code::{ErrorCategory, ErrorCode};
 pub use types::{EdgeId, GasRate, PhaseId, RunId, ScenarioId, TxCount};
