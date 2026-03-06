@@ -1825,7 +1825,9 @@ dependencies = [
 name = "gashammer-hive"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "axum",
+ "clap",
  "gashammer-common",
  "serde",
  "serde_json",
@@ -1833,6 +1835,7 @@ dependencies = [
  "tokio",
  "tower 0.4.13",
  "tracing",
+ "tracing-subscriber",
  "uuid",
 ]
 
