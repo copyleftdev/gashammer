@@ -1715,6 +1715,7 @@ dependencies = [
  "alloy",
  "futures-util",
  "gashammer-common",
+ "gashammer-testenv",
  "reqwest",
  "serde",
  "serde_json",
