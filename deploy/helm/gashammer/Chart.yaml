@@ -1,0 +1,22 @@
+apiVersion: v2
+name: gashammer
+description: Adversarial load-testing and correctness-verification platform for Arbitrum Nitro
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+home: https://github.com/copyleftdev/gashammer
+sources:
+  - https://github.com/copyleftdev/gashammer
+maintainers:
+  - name: Don Johnson
+    url: https://github.com/copyleftdev
+keywords:
+  - arbitrum
+  - nitro
+  - load-testing
+  - blockchain
+  - rollup
+annotations:
+  licenses: BSL-1.1
+  com.gashammer.author: Don Johnson
+  com.gashammer.trademark: GasHammer is a registered trademark of Don Johnson

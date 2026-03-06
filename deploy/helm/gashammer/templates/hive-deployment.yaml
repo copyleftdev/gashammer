@@ -1,0 +1,81 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "gashammer.fullname" . }}-hive
+  labels:
+    {{- include "gashammer.hive.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.hive.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "gashammer.hive.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "gashammer.hive.labels" . | nindent 8 }}
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/hive-configmap.yaml") . | sha256sum }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: hive
+          image: {{ include "gashammer.hive.image" . }}
+          imagePullPolicy: {{ .Values.hive.image.pullPolicy }}
+          args:
+            - --config
+            - /etc/gashammer/hive.toml
+          ports:
+            - name: rest
+              containerPort: {{ .Values.hive.config.server.rest_port }}
+              protocol: TCP
+            - name: grpc
+              containerPort: {{ .Values.hive.config.server.grpc_port }}
+              protocol: TCP
+            - name: metrics
+              containerPort: {{ .Values.hive.config.telemetry.prometheus_port }}
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: rest
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: rest
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            {{- toYaml .Values.hive.resources | nindent 12 }}
+          volumeMounts:
+            - name: config
+              mountPath: /etc/gashammer
+              readOnly: true
+            - name: data
+              mountPath: {{ .Values.hive.config.storage.data_dir }}
+          {{- with .Values.hive.extraEnv }}
+          env:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "gashammer.fullname" . }}-hive-config
+        - name: data
+          emptyDir: {}
+      {{- with .Values.hive.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.hive.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.hive.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
