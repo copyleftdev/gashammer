@@ -21,8 +21,8 @@ use testcontainers::Image;
 
 use super::sequencer::NITRO_IMAGE;
 
-/// Default feed relay image tag.
-pub const FEED_RELAY_TAG: &str = "latest";
+/// Default feed relay image tag (same as sequencer — same binary).
+pub const FEED_RELAY_TAG: &str = "v3.9.7-75e084e";
 
 /// Feed relay WebSocket port.
 pub const FEED_RELAY_PORT: u16 = 9642;

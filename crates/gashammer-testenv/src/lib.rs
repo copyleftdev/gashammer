@@ -14,4 +14,5 @@ pub mod containers;
 pub mod contracts;
 pub mod devnet;
 pub mod error;
+pub mod funding;
 pub mod lifecycle;
