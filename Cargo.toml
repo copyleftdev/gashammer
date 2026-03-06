@@ -34,6 +34,7 @@ proptest = "1"
 alloy = { version = "0.12", features = ["provider-http", "rpc-types", "signers", "signer-local", "consensus", "network"] }
 tokio-tungstenite = { version = "0.24", features = ["native-tls"] }
 futures-util = "0.3"
+reqwest = { version = "0.12", features = ["json"] }
 url = "2"
 
 # Workspace crates

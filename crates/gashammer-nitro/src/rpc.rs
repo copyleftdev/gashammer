@@ -15,10 +15,12 @@ use std::time::Duration;
 use alloy::primitives::{Address, Bytes, TxHash, U256};
 use alloy::providers::{Provider, RootProvider};
 use alloy::rpc::types::{Block, BlockNumberOrTag, Filter, Log, TransactionReceipt};
+use alloy::transports::http::Http;
 use serde::{Deserialize, Serialize};
 use url::Url;
 
 use crate::error::NitroError;
+use crate::headers;
 
 /// Configuration for an RPC provider connection.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -66,14 +68,17 @@ pub struct NitroRpcProvider {
 }
 
 impl NitroRpcProvider {
-    /// Connect to an RPC endpoint.
+    /// Connect to an RPC endpoint with GasHammer User-Agent headers.
     pub fn new(config: RpcConfig) -> Result<Self, NitroError> {
         let url: Url = config
             .url
             .parse()
             .map_err(|e| NitroError::Config(format!("invalid RPC URL: {e}")))?;
 
-        let provider = RootProvider::new_http(url);
+        let client = headers::http_client()?;
+        let http = Http::with_client(client, url);
+        let rpc_client = alloy::rpc::client::RpcClient::new(http, false);
+        let provider = RootProvider::new(rpc_client);
 
         Ok(Self { provider, config })
     }
