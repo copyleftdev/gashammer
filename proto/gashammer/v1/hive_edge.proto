@@ -1,0 +1,143 @@
+// Copyright (c) 2025-present Don Johnson
+// Licensed under the Business Source License 1.1 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     https://github.com/copyleftdev/gashammer/blob/main/LICENSE
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// GasHammer is a registered trademark of Don Johnson.
+
+syntax = "proto3";
+package gashammer.v1;
+
+import "gashammer/v1/types.proto";
+import "gashammer/v1/telemetry.proto";
+
+// HiveCoordinator is the primary gRPC service for hive-edge communication.
+// Package name "gashammer.v1" is part of DNA provenance (RFC-0011 §4.1).
+service HiveCoordinator {
+  // ── Edge lifecycle ──────────────────────────────────────────────
+  // Register a new edge with the hive.
+  rpc RegisterEdge(RegisterEdgeRequest) returns (RegisterEdgeResponse);
+  // Bidirectional heartbeat stream.
+  rpc Heartbeat(stream HeartbeatMessage) returns (stream HeartbeatAck);
+  // Deregister an edge (graceful shutdown).
+  rpc DeregisterEdge(DeregisterEdgeRequest) returns (DeregisterEdgeResponse);
+
+  // ── Run coordination ────────────────────────────────────────────
+  // Prepare an edge for a new run.
+  rpc PrepareRun(PrepareRunRequest) returns (PrepareRunResponse);
+  // Signal barrier readiness from an edge.
+  rpc BarrierReady(BarrierReadyRequest) returns (BarrierReadyResponse);
+  // Bidirectional control stream for run lifecycle.
+  rpc StreamControl(stream EdgeStatusUpdate) returns (stream ControlMessage);
+
+  // ── Telemetry ───────────────────────────────────────────────────
+  // Client-streaming: edge sends telemetry events to hive.
+  rpc StreamEvents(stream TelemetryEvent) returns (StreamEventsResponse);
+  // Client-streaming: edge sends metric batches to hive.
+  rpc StreamMetrics(stream MetricBatch) returns (StreamMetricsResponse);
+}
+
+// ── Edge lifecycle messages ─────────────────────────────────────────
+
+message RegisterEdgeRequest {
+  string bootstrap_token = 1;
+  string region = 2;
+  string capacity_class = 3;
+  string software_version = 4;
+  repeated string supported_adapters = 5;
+  InstanceProfile instance_profile = 6;
+}
+
+message RegisterEdgeResponse {
+  string edge_id = 1;
+  int64 heartbeat_interval_ms = 2;
+}
+
+message DeregisterEdgeRequest {
+  string edge_id = 1;
+  string reason = 2;
+}
+
+message DeregisterEdgeResponse {}
+
+message HeartbeatMessage {
+  string edge_id = 1;
+  int64 timestamp_ns = 2;
+  float cpu_utilization = 3;
+  float memory_utilization = 4;
+  uint32 active_connections = 5;
+  string current_run_id = 6;
+}
+
+message HeartbeatAck {
+  int64 timestamp_ns = 1;
+}
+
+// ── Run coordination messages ───────────────────────────────────────
+
+message PrepareRunRequest {
+  string run_id = 1;
+  string edge_id = 2;
+  WorkloadSlice workload_slice = 3;
+}
+
+message PrepareRunResponse {
+  bool accepted = 1;
+  string reject_reason = 2;
+}
+
+message BarrierReadyRequest {
+  string run_id = 1;
+  string edge_id = 2;
+  string barrier_id = 3;
+}
+
+message BarrierReadyResponse {
+  bool proceed = 1;
+  int64 start_timestamp_ns = 2;
+}
+
+message EdgeStatusUpdate {
+  string edge_id = 1;
+  string run_id = 2;
+  EdgeStatus status = 3;
+  string message = 4;
+  int64 timestamp_ns = 5;
+}
+
+enum EdgeStatus {
+  EDGE_STATUS_UNSPECIFIED = 0;
+  EDGE_STATUS_PREPARING = 1;
+  EDGE_STATUS_READY = 2;
+  EDGE_STATUS_RUNNING = 3;
+  EDGE_STATUS_DRAINING = 4;
+  EDGE_STATUS_COMPLETED = 5;
+  EDGE_STATUS_FAILED = 6;
+}
+
+// ControlMessage sent from hive to edge during a run.
+message ControlMessage {
+  oneof message {
+    PrepareBarrier prepare_barrier = 1;
+    ReleaseBarrier release_barrier = 2;
+    PhaseTransition phase_transition = 3;
+    AbortRun abort_run = 4;
+    DrainEdge drain_edge = 5;
+    WorkloadSlice workload_slice = 6;
+  }
+}
+
+// ── Telemetry response messages ─────────────────────────────────────
+
+message StreamEventsResponse {
+  uint64 events_received = 1;
+}
+
+message StreamMetricsResponse {
+  uint64 batches_received = 1;
+}
