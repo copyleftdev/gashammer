@@ -10,5 +10,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // GasHammer is a registered trademark of Don Johnson.
 
+pub mod envelope;
 pub mod error;
+pub mod regression;
 pub mod report;
