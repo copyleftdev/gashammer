@@ -28,6 +28,14 @@ pub enum EdgeError {
     /// GH-E202: Feed correlation error.
     #[error("GH-E202: feed correlation error: {0}")]
     FeedCorrelation(String),
+
+    /// GH-E203: Configuration error.
+    #[error("GH-E203: config error: {0}")]
+    Config(String),
+
+    /// GH-E204: Connection error.
+    #[error("GH-E204: connection error: {0}")]
+    Connection(String),
 }
 
 #[cfg(test)]
