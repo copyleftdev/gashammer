@@ -14,19 +14,23 @@ The hive is GasHammer's central control plane. It coordinates runs across edges,
 ## Run State Machine
 
 ```text
-Created ──▶ Starting ──▶ Running ──▶ Stopping ──▶ Completed
-               │            │            │
-               │            │            └──▶ Failed
-               │            └──────────────▶ Failed
-               └────────────────────────────▶ Failed
+Preflight ──▶ Barrier ──▶ Running ──▶ Completing ──▶ Done
+                │            │             │
+                │            │             └──▶ Done(Fail)
+                │            ├──▶ Recovering ──▶ Running
+                │            │
+                └────────────┴──▶ Aborted
 ```
 
-- **Created** --- scenario validated, run ID assigned
-- **Starting** --- edges notified, waiting for all edges to acknowledge
-- **Running** --- workload active, phases progressing with barrier sync
-- **Stopping** --- drain in progress, edges flushing final telemetry
-- **Completed** --- all phases done, report generated
-- **Failed** --- error occurred (edge disconnection, timeout, invariant violation)
+- **Preflight** --- fault adapters checked, scenario validated, edges notified
+- **Barrier** --- waiting for all edges to acknowledge readiness (barrier sync)
+- **Running** --- workload active, phases progressing (`phase_index`, `phase_name` tracked)
+- **Recovering** --- transient error detected, attempting recovery before resuming
+- **Completing** --- drain in progress, edges flushing final telemetry
+- **Done** --- terminal state with outcome: `Pass`, `Fail`, or `Inconclusive`
+- **Aborted** --- terminal state with reason string (unrecoverable error, manual cancel)
+
+State transitions are validated: `RunState::can_transition_to()` enforces legal transitions. Terminal states (`Done`, `Aborted`) cannot transition further. `is_terminal()` and `is_active()` are available for status queries.
 
 ## Phase Synchronization
 
