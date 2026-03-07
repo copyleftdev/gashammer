@@ -136,7 +136,6 @@ Every source file includes a license header:
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// GasHammer is a registered trademark of Don Johnson.
 ```
 
 Automated via `cargo-deny` license check + CI enforcement. **No file ships without a header.**

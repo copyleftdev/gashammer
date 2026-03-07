@@ -8,7 +8,6 @@
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// GasHammer is a registered trademark of Don Johnson.
 
 //! Regression detection — compare a run against a baseline and produce a
 //! release gate verdict.

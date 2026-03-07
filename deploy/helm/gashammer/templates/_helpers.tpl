@@ -1,7 +1,6 @@
 {{/*
 Copyright (c) 2025-present Don Johnson
 Licensed under the Business Source License 1.1.
-GasHammer is a registered trademark of Don Johnson.
 */}}
 
 {{/*

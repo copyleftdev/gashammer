@@ -91,7 +91,6 @@ Every `.rs` file includes the BSL-1.1 license header:
 // Copyright (c) 2025-present Don Johnson
 // Licensed under the Business Source License 1.1 (the "License");
 // ...
-// GasHammer is a registered trademark of Don Johnson.
 ```
 
 This is enforced by `scripts/check-license-headers.sh` in CI.
