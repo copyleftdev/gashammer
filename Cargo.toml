@@ -19,7 +19,7 @@ members = [
 version = "0.1.0"
 edition = "2021"
 rust-version = "1.75.0"
-license = "BSL-1.1"
+license = "BUSL-1.1"
 repository = "https://github.com/copyleftdev/gashammer"
 authors = ["Don Johnson <copyleftdev@github.com>"]
 
