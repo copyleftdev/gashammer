@@ -1,6 +1,5 @@
 # Copyright (c) 2025-present Don Johnson
 # Licensed under the Business Source License 1.1 (the "License").
-# GasHammer is a registered trademark of Don Johnson.
 
 # ── Stage 1: Builder ─────────────────────────────────────────────────
 FROM rust:1.82-bookworm AS builder

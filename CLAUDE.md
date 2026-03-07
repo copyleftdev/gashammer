@@ -242,7 +242,6 @@ Every source file must include the license header:
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// GasHammer is a registered trademark of Don Johnson.
 ```
 
 Every binary must embed the canary string (gashammer-common/src/build_info.rs). Every metric must use the `gashammer_` prefix. Every error code must use the `GH-Exxx` scheme.

@@ -75,4 +75,4 @@ GasHammer targets [Arbitrum Nitro](https://github.com/OffchainLabs/nitro) by [Of
 
 ## License
 
-Licensed under the [Business Source License 1.1](LICENSE). GasHammer is a registered trademark of Don Johnson.
+Licensed under the [Business Source License 1.1](LICENSE).
