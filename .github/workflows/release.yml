@@ -272,7 +272,7 @@ jobs:
             echo "\`\`\`"
             echo ""
             echo "---"
-            echo "*GasHammer is a registered trademark of Don Johnson. Licensed under BSL-1.1.*"
+            echo "*Licensed under BSL-1.1.*"
             echo "NOTES_EOF"
           } >> "$GITHUB_OUTPUT"
 

@@ -42,7 +42,7 @@ GasHammer uses a **hive/edge topology**:
 
 ## License
 
-GasHammer is licensed under the Business Source License 1.1 (BSL-1.1). GasHammer is a registered trademark of Don Johnson.
+GasHammer is licensed under the Business Source License 1.1 (BSL-1.1).
 
 ## Next Steps
 
